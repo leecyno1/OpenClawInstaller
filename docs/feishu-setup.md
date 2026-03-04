@@ -6,6 +6,7 @@
 
 - 已安装 OpenClaw（运行 `install.sh` 完成安装）
 - 飞书账号（个人账号即可，无需企业认证）
+- Installer 已更新为仅使用官方飞书插件：`@openclaw/feishu`
 
 ## ✨ 特性说明
 
