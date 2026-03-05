@@ -1,5 +1,11 @@
 # auto-install-Openclaw
 
+> [!IMPORTANT]
+> **一键安装（推荐）**
+> ```bash
+> curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/install.sh | bash
+> ```
+
 <p align="center">
   <img src="photo/openclaw-installer-logo.svg" alt="auto-install-Openclaw Logo" width="780" />
 </p>
