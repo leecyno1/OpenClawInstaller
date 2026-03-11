@@ -2748,13 +2748,22 @@ config_channels() {
     print_menu_item "2" "Discord 机器人" "🎮"
     print_menu_item "3" "WhatsApp" "💬"
     print_menu_item "4" "Slack" "💼"
-    print_menu_item "5" "微信 (WeChat)" "🟢"
-    print_menu_item "6" "iMessage" "🍎"
-    print_menu_item "7" "飞书 (Feishu)" "🔷"
+    print_menu_item "5" "飞书 (Feishu)" "🔷"
+    print_menu_item "6" "Signal（官方）" "🔐"
+    print_menu_item "7" "Microsoft Teams（官方插件）" "🏢"
+    print_menu_item "8" "Mattermost（官方插件）" "🧩"
+    print_menu_item "9" "Google Chat（官方插件）" "🟨"
+    print_menu_item "10" "Matrix（官方插件）" "🔷"
+    print_menu_item "11" "LINE（官方插件）" "🟩"
+    print_menu_item "12" "Nextcloud Talk（官方插件）" "☁️"
+    print_menu_item "13" "更多官方渠道" "🧭"
+    print_menu_item "14" "钉钉/QQ/企业微信 官方状态检查" "🧾"
+    print_menu_item "15" "微信（社区/旧版，非官方）" "🟢"
+    print_menu_item "16" "iMessage（旧版）" "🍎"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
     
-    echo -en "${YELLOW}请选择 [0-7]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-16]: ${NC}"
     read choice < "$TTY_INPUT"
     
     case $choice in
@@ -2762,9 +2771,18 @@ config_channels() {
         2) config_discord ;;
         3) config_whatsapp ;;
         4) config_slack ;;
-        5) config_wechat ;;
-        6) config_imessage ;;
-        7) config_feishu ;;
+        5) config_feishu ;;
+        6) config_signal ;;
+        7) config_msteams ;;
+        8) config_mattermost ;;
+        9) config_googlechat ;;
+        10) config_matrix ;;
+        11) config_line ;;
+        12) config_nextcloud_talk ;;
+        13) config_more_official_channels ;;
+        14) check_cn_enterprise_channel_official_status ;;
+        15) config_wechat ;;
+        16) config_imessage ;;
         0) return ;;
         *) log_error "无效选择"; press_enter; config_channels ;;
     esac
@@ -3053,15 +3071,159 @@ config_slack() {
     press_enter
 }
 
+get_official_channel_package() {
+    local channel="$1"
+    case "$channel" in
+        signal) echo "@openclaw/signal" ;;
+        msteams) echo "@openclaw/msteams" ;;
+        mattermost) echo "@openclaw/mattermost" ;;
+        googlechat) echo "@openclaw/googlechat" ;;
+        matrix) echo "@openclaw/matrix" ;;
+        line) echo "@openclaw/line" ;;
+        nextcloud-talk) echo "@openclaw/nextcloud-talk" ;;
+        irc) echo "@openclaw/irc" ;;
+        twitch) echo "@openclaw/twitch" ;;
+        zalo) echo "@openclaw/zalo" ;;
+        zalouser) echo "@openclaw/zalouser" ;;
+        nostr) echo "@openclaw/nostr" ;;
+        tlon) echo "@openclaw/tlon" ;;
+        synology-chat) echo "@openclaw/synology-chat" ;;
+        bluebubbles) echo "@openclaw/bluebubbles" ;;
+        *) echo "" ;;
+    esac
+}
+
+config_official_plugin_channel() {
+    local channel="$1"
+    local display_name="$2"
+
+    clear_screen
+    print_header
+    echo -e "${WHITE}🔌 配置 ${display_name}${NC}"
+    print_divider
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        press_enter
+        return
+    fi
+
+    ensure_openclaw_init
+
+    local pkg
+    pkg="$(get_official_channel_package "$channel")"
+    if [ -z "$pkg" ]; then
+        log_error "未找到 ${display_name} 对应的官方插件包映射"
+        press_enter
+        return
+    fi
+
+    echo -e "${CYAN}该渠道使用官方插件: ${WHITE}${pkg}${NC}"
+    echo -e "${CYAN}将执行: 安装插件 -> 启用插件 -> 渠道配置向导${NC}"
+    echo ""
+
+    if confirm "是否安装/更新官方插件 ${pkg}？" "y"; then
+        if openclaw plugins install "$pkg" --pin; then
+            log_info "官方插件安装成功: $pkg"
+        else
+            log_warn "插件安装失败，继续尝试使用已安装版本配置渠道"
+        fi
+    fi
+
+    openclaw plugins enable "$channel" 2>/dev/null || true
+    ensure_plugin_in_allow "$channel"
+
+    echo ""
+    log_info "启动渠道配置向导..."
+    if openclaw channels add --channel "$channel"; then
+        log_info "${display_name} 渠道配置成功！"
+    else
+        log_warn "${display_name} 渠道向导未成功完成，可稍后重试。"
+        echo -e "${CYAN}手动命令:${NC} ${WHITE}openclaw channels add --channel ${channel}${NC}"
+    fi
+
+    echo ""
+    if confirm "是否重启 Gateway 使配置生效？" "y"; then
+        restart_gateway_for_channel
+    fi
+
+    press_enter
+}
+
+config_signal() { config_official_plugin_channel "signal" "Signal（官方）"; }
+config_msteams() { config_official_plugin_channel "msteams" "Microsoft Teams（官方插件）"; }
+config_mattermost() { config_official_plugin_channel "mattermost" "Mattermost（官方插件）"; }
+config_googlechat() { config_official_plugin_channel "googlechat" "Google Chat（官方插件）"; }
+config_matrix() { config_official_plugin_channel "matrix" "Matrix（官方插件）"; }
+config_line() { config_official_plugin_channel "line" "LINE（官方插件）"; }
+config_nextcloud_talk() { config_official_plugin_channel "nextcloud-talk" "Nextcloud Talk（官方插件）"; }
+
+config_more_official_channels() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🧭 更多官方渠道${NC}"
+    print_divider
+    echo ""
+    print_menu_item "1" "IRC（官方插件）" "💻"
+    print_menu_item "2" "Twitch（官方插件）" "🟣"
+    print_menu_item "3" "Zalo（官方插件）" "🇻🇳"
+    print_menu_item "4" "Zalo Personal（官方插件）" "📱"
+    print_menu_item "5" "Nostr（官方插件）" "🌐"
+    print_menu_item "6" "Tlon（官方插件）" "🪐"
+    print_menu_item "7" "Synology Chat（官方插件）" "🗄️"
+    print_menu_item "8" "BlueBubbles（官方）" "🔵"
+    print_menu_item "0" "返回" "↩️"
+    echo ""
+    echo -en "${YELLOW}请选择 [0-8]: ${NC}"
+    read choice < "$TTY_INPUT"
+    case $choice in
+        1) config_official_plugin_channel "irc" "IRC（官方插件）" ;;
+        2) config_official_plugin_channel "twitch" "Twitch（官方插件）" ;;
+        3) config_official_plugin_channel "zalo" "Zalo（官方插件）" ;;
+        4) config_official_plugin_channel "zalouser" "Zalo Personal（官方插件）" ;;
+        5) config_official_plugin_channel "nostr" "Nostr（官方插件）" ;;
+        6) config_official_plugin_channel "tlon" "Tlon（官方插件）" ;;
+        7) config_official_plugin_channel "synology-chat" "Synology Chat（官方插件）" ;;
+        8) config_official_plugin_channel "bluebubbles" "BlueBubbles（官方）" ;;
+        0) return ;;
+        *) log_error "无效选择"; press_enter; config_more_official_channels ;;
+    esac
+}
+
+check_cn_enterprise_channel_official_status() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🧾 国内企业渠道官方适配检查${NC}"
+    print_divider
+    echo ""
+    echo -e "${CYAN}对照基线: 官方扩展目录 + 官方 channels 文档（最新版）${NC}"
+    echo ""
+    echo -e "  • 钉钉（DingTalk）: ${YELLOW}当前未发现官方插件${NC}"
+    echo -e "  • QQ: ${YELLOW}当前未发现官方插件${NC}"
+    echo -e "  • 企业微信（WeCom）: ${YELLOW}当前未发现官方插件${NC}"
+    echo ""
+    echo -e "${CYAN}已纳入的官方企业渠道替代项:${NC}"
+    echo "  • 飞书（Feishu）"
+    echo "  • Microsoft Teams（插件）"
+    echo "  • Slack"
+    echo "  • Google Chat（插件）"
+    echo "  • Mattermost（插件）"
+    echo ""
+    echo -e "${YELLOW}说明:${NC} 为避免与官方能力漂移，本安装器仅默认纳入已发布的官方渠道插件。"
+    echo ""
+    press_enter
+}
+
 config_wechat() {
     clear_screen
     print_header
     
-    echo -e "${WHITE}🟢 配置微信${NC}"
+    echo -e "${WHITE}🟢 配置微信（社区/旧版）${NC}"
     print_divider
     echo ""
     
-    echo -e "${YELLOW}⚠️ 注意: 微信接入需要第三方工具支持${NC}"
+    echo -e "${YELLOW}⚠️ 注意: 微信当前不在官方渠道列表中，通常需要第三方桥接方案${NC}"
     echo ""
     
     if ! check_openclaw_installed; then
@@ -3070,9 +3232,10 @@ config_wechat() {
         return
     fi
     
-    echo -e "${CYAN}微信接入方案:${NC}"
-    echo "  • OpenClaw 可能通过插件支持微信"
-    echo "  • 请查看 OpenClaw 文档了解详情"
+    echo -e "${CYAN}微信接入说明:${NC}"
+    echo "  • 当前官方 channels 文档未列出微信官方插件"
+    echo "  • 该入口仅用于旧版/社区方案排查，不作为官方适配路径"
+    echo "  • 推荐优先使用飞书、Slack、Teams、Google Chat 等官方渠道"
     echo ""
     
     # 检查是否有微信相关插件
