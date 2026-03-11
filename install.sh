@@ -392,6 +392,40 @@ check_root() {
     fi
 }
 
+ensure_sudo_privileges() {
+    # root 用户无需 sudo
+    if [[ $EUID -eq 0 ]]; then
+        return 0
+    fi
+
+    # Linux 下依赖安装和 systemd 操作需要 sudo
+    if [[ "$OS" != "macos" ]]; then
+        if ! check_command sudo; then
+            log_error "未检测到 sudo，无法安装系统依赖。请安装 sudo 或使用 root 运行。"
+            exit 1
+        fi
+
+        log_step "检查并请求 sudo 权限..."
+        if ! sudo -v; then
+            log_error "sudo 授权失败，安装已中止。"
+            echo -e "${YELLOW}请确认当前用户在 sudoers 中，或改用 root 运行。${NC}"
+            exit 1
+        fi
+
+        # 保持 sudo 会话，避免中途过期导致命令失败
+        (
+            while true; do
+                sudo -n true 2>/dev/null || exit 0
+                sleep 50
+            done
+        ) &
+        SUDO_KEEPALIVE_PID=$!
+        trap 'if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then kill "${SUDO_KEEPALIVE_PID}" 2>/dev/null || true; fi' EXIT
+
+        log_info "sudo 权限已就绪"
+    fi
+}
+
 # ================================ 依赖检查与安装 ================================
 
 check_command() {
@@ -2054,6 +2088,7 @@ main() {
     echo ""
     detect_os
     check_root
+    ensure_sudo_privileges
     install_dependencies
     create_directories
     install_openclaw
