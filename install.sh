@@ -564,6 +564,35 @@ install_openclaw_via_official() {
     return "$install_exit"
 }
 
+ensure_openclaw_on_path() {
+    # 尝试从常见 npm 全局安装位置补充 PATH，避免“已安装但当前 shell 不可见”
+    local npm_prefix=""
+    local npm_bin=""
+    local candidate=""
+
+    if check_command npm; then
+        npm_prefix="$(npm config get prefix 2>/dev/null || true)"
+        if [ -n "$npm_prefix" ] && [ "$npm_prefix" != "undefined" ] && [ "$npm_prefix" != "null" ]; then
+            npm_bin="$npm_prefix/bin"
+            if [ -d "$npm_bin" ]; then
+                case ":$PATH:" in
+                    *":$npm_bin:"*) ;;
+                    *) export PATH="$npm_bin:$PATH" ;;
+                esac
+            fi
+        fi
+    fi
+
+    for candidate in "$HOME/.npm-global/bin" "$HOME/.local/bin" "/usr/local/bin" "/usr/bin"; do
+        if [ -d "$candidate" ]; then
+            case ":$PATH:" in
+                *":$candidate:"*) ;;
+                *) export PATH="$candidate:$PATH" ;;
+            esac
+        fi
+    done
+}
+
 install_openclaw() {
     log_step "安装 OpenClaw..."
     
@@ -587,11 +616,22 @@ install_openclaw() {
     fi
     
     # 验证安装
+    ensure_openclaw_on_path
     if check_command openclaw; then
         log_info "OpenClaw 安装成功: $(openclaw --version 2>/dev/null || echo 'installed')"
         init_openclaw_config
     else
-        log_error "OpenClaw 安装失败"
+        log_error "OpenClaw 安装后未在当前 PATH 中发现可执行文件"
+        if check_command npm; then
+            local npm_prefix_hint
+            npm_prefix_hint="$(npm config get prefix 2>/dev/null || true)"
+            if [ -n "$npm_prefix_hint" ] && [ "$npm_prefix_hint" != "undefined" ] && [ "$npm_prefix_hint" != "null" ]; then
+                echo -e "${YELLOW}可能的修复方式:${NC}"
+                echo "  export PATH=\"$npm_prefix_hint/bin:\$PATH\""
+                echo "  hash -r"
+                echo "  command -v openclaw && openclaw --version"
+            fi
+        fi
         exit 1
     fi
 }
