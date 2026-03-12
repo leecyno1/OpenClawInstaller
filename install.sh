@@ -303,6 +303,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_SWAP_THRESHOLD_MB=<默认4096>
   OPENCLAW_SWAP_TARGET_MB=<默认自动(2G或4G)>
   OPENCLAW_SWAP_FILE=</swapfile.openclaw>
+  OPENCLAW_SKILLS_FORCE_UPDATE=0|1
 EOF
 }
 
@@ -1213,13 +1214,19 @@ apply_default_security_baseline() {
 install_channel_assets() {
     local skill_dir="$CONFIG_DIR/skills/channel-setup-assistant"
     local skill_file="$skill_dir/SKILL.md"
+    local skills_root="$CONFIG_DIR/skills"
     local docs_dir="$CONFIG_DIR/docs"
     local doc_file="$docs_dir/channels-configuration-guide.md"
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local local_doc="$script_dir/docs/channels-configuration-guide.md"
+    local local_skill="$script_dir/skills/channel-setup-assistant/SKILL.md"
+    local bundled_skills_dir="$script_dir/skills/default"
+    local skills_force_update="${OPENCLAW_SKILLS_FORCE_UPDATE:-0}"
+    local copied_count=0
+    local kept_count=0
 
-    mkdir -p "$skill_dir" "$docs_dir" 2>/dev/null || true
+    mkdir -p "$skill_dir" "$skills_root" "$docs_dir" 2>/dev/null || true
 
     if [ -f "$local_doc" ]; then
         cp "$local_doc" "$doc_file" 2>/dev/null || true
@@ -1244,7 +1251,10 @@ install_channel_assets() {
 EOF
     fi
 
-    cat > "$skill_file" <<'EOF'
+    if [ -f "$local_skill" ]; then
+        cp "$local_skill" "$skill_file" 2>/dev/null || true
+    else
+        cat > "$skill_file" <<'EOF'
 # OpenClaw 渠道配置助手 Skill
 
 目标：当用户提供消息渠道信息时，交互式收集缺失参数，并执行命令行完成配置。
@@ -1272,6 +1282,32 @@ EOF
 2) `openclaw gateway restart`
 3) `openclaw channels list`
 EOF
+    fi
+
+    # 默认技能包注入（可通过 OPENCLAW_SKILLS_FORCE_UPDATE=1 强制覆盖）
+    if [ -d "$bundled_skills_dir" ]; then
+        local bundled_src
+        for bundled_src in "$bundled_skills_dir"/*; do
+            [ -d "$bundled_src" ] || continue
+            local skill_name
+            local skill_target
+            skill_name="$(basename "$bundled_src")"
+            skill_target="$skills_root/$skill_name"
+
+            if [ -d "$skill_target" ] && [ "$skills_force_update" != "1" ]; then
+                kept_count=$((kept_count + 1))
+                continue
+            fi
+
+            rm -rf "$skill_target" 2>/dev/null || true
+            if cp -a "$bundled_src" "$skill_target" 2>/dev/null; then
+                copied_count=$((copied_count + 1))
+            fi
+        done
+        log_info "默认技能包已处理: 新增/更新 ${copied_count} 个，保留 ${kept_count} 个（已存在）"
+    else
+        log_warn "未找到默认技能包目录: $bundled_skills_dir"
+    fi
 
     chmod 644 "$skill_file" "$doc_file" 2>/dev/null || true
     log_info "已注入渠道配置文档与 Skill:"
@@ -2728,6 +2764,7 @@ print_success() {
     echo "  openclaw doctor          # 诊断问题"
     echo "  ~/.openclaw/docs/channels-configuration-guide.md  # 渠道配置文档"
     echo "  ~/.openclaw/skills/channel-setup-assistant/SKILL.md  # 渠道配置 Skill"
+    echo "  ~/.openclaw/skills/      # 默认技能包目录"
     echo ""
     echo -e "${PURPLE}📚 官方文档: $OFFICIAL_DOCS_URL${NC}"
     echo -e "${PURPLE}💬 社区支持: https://github.com/$GITHUB_REPO/discussions${NC}"

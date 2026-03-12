@@ -43,6 +43,7 @@
 - [快速开始](#快速开始)
 - [操作手册](#操作手册)
 - [配置说明](#配置说明)
+- [默认技能包](#默认技能包)
 - [渠道配置文档](#渠道配置文档)
 - [飞书插件说明](#飞书插件说明)
 - [微信适配说明（社区）](#微信适配说明社区)
@@ -259,6 +260,45 @@ auto-install-Openclaw 当前推荐配置模型：
 ├── backups/
 └── logs/
 ```
+
+## 默认技能包
+
+安装脚本会默认将仓库内 `skills/default/*` 同步到 `~/.openclaw/skills/`（已存在同名技能默认保留，不覆盖）。  
+如需强制覆盖更新同名技能，可在安装前设置：
+
+```bash
+export OPENCLAW_SKILLS_FORCE_UPDATE=1
+```
+
+当前默认打包技能：
+
+- capability-evolver
+- openclaw-cron-setup
+- proactive-agent
+- self-improving-agent-cn
+- brainstorming
+- reflection
+- find-skills
+- skill-creator
+- agent-browser
+- chrome-devtools-mcp
+- github
+- mcp-builder
+- model-usage
+- shell
+- minimax-understand-image
+- tavily-search
+- web-search
+- minimax-web-search
+- blogwatcher
+- news-radar
+- summarize
+- url-to-markdown
+- pdf
+- nano-pdf
+- docx
+- pptx
+- xlsx
 
 ## 渠道配置文档
 
