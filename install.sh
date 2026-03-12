@@ -1976,12 +1976,12 @@ run_onboard_wizard() {
         if run_step_with_auto_fix "官方配置向导" run_official_onboard; then
             echo ""
             echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo -e "${WHITE}  第 2 步: 消息渠道配置${NC}"
+            echo -e "${WHITE}  第 2 步: 非官方消息渠道配置（社区）${NC}"
             echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            if confirm "现在进入消息渠道配置？" "y"; then
-                if ! run_step_with_auto_fix "消息渠道配置菜单" run_config_menu --channels-only; then
-                    log_warn "消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
+            if confirm "现在进入非官方消息渠道配置（社区）？" "y"; then
+                if ! run_step_with_auto_fix "非官方消息渠道配置菜单" run_config_menu --channels-only; then
+                    log_warn "非官方消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
                 fi
             fi
             log_info "官方配置流程完成。"
@@ -2066,7 +2066,7 @@ run_onboard_wizard() {
         echo "  1. 选择 AI 模型提供商"
         echo "  2. 配置 API 连接"
         echo "  3. 测试 API 连接"
-        echo "  4. 消息渠道配置"
+        echo "  4. 非官方消息渠道配置（社区）"
         echo ""
     fi
     
@@ -2083,19 +2083,19 @@ run_onboard_wizard() {
         fi
     fi
     
-    # 模型配置完成后，自动进入消息渠道配置
+    # 模型配置完成后，自动进入非官方消息渠道配置
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}  第 3 步: 消息渠道配置${NC}"
+    echo -e "${WHITE}  第 3 步: 非官方消息渠道配置（社区）${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    if confirm "现在进入消息渠道配置？" "y"; then
+    if confirm "现在进入非官方消息渠道配置（社区）？" "y"; then
         if ! run_config_menu --channels-only; then
-            log_warn "消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
+            log_warn "非官方消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
         fi
     fi
 
-    log_info "模型与消息渠道配置流程已完成！"
+    log_info "模型与非官方消息渠道配置流程已完成！"
 }
 
 # ================================ AI Provider 配置 ================================
@@ -2984,7 +2984,7 @@ main() {
     echo -e "${WHITE}           📝 配置菜单（命令行版）${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "${GRAY}配置菜单支持: 渠道配置、身份设置、安全配置、服务管理等${NC}"
+    echo -e "${GRAY}配置菜单支持: 官方/非官方渠道、Skills 管理、安全配置、服务管理等${NC}"
     echo ""
     echo -e "${WHITE}💡 下次可以直接运行配置菜单:${NC}"
     echo -e "   ${CYAN}bash ./config-menu.sh${NC}"

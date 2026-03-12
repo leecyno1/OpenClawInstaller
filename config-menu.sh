@@ -119,6 +119,9 @@ WECOM_PLUGIN_COMMUNITY="@marshulll/openclaw-wecom"
 WECOM_PLUGIN_VERSION_DEFAULT="${OPENCLAW_WECOM_PLUGIN_VERSION:-0.1.41}"
 WECOM_WEBHOOK_BOT_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_BOT_PATH:-/wecom/bot}"
 WECOM_WEBHOOK_APP_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_APP_PATH:-/wecom/app}"
+# 钉钉社区插件策略（DingTalk）
+DINGTALK_PLUGIN_COMMUNITY="openclaw-channel-dingtalk"
+DINGTALK_PLUGIN_VERSION_DEFAULT="${OPENCLAW_DINGTALK_PLUGIN_VERSION:-2.2.2}"
 INSTALLER_REPO="leecyno1/auto-install-Openclaw"
 INSTALLER_RAW_URL="https://raw.githubusercontent.com/${INSTALLER_REPO}/main"
 AUTO_FIX_OPENCLAW_REPO_URL="${AUTO_FIX_OPENCLAW_REPO_URL:-https://github.com/leecyno1/auto-fix-openclaw.git}"
@@ -1432,17 +1435,15 @@ config_ai_model() {
     echo -e "${WHITE}🤖 AI 模型配置${NC}"
     print_divider
     echo ""
-
-    echo -e "${CYAN}推荐优先使用官方向导（模型列表与参数始终最新）${NC}"
-    if confirm "是否启动官方向导 openclaw onboard？" "y"; then
-        if run_official_model_onboard; then
-            log_info "官方模型配置完成。"
-            press_enter
-            return
-        fi
-        log_warn "官方向导执行失败，继续使用本地兼容配置菜单。"
-        echo ""
+    echo -e "${CYAN}本项目已切换为官方模型配置流程：openclaw onboard${NC}"
+    echo ""
+    if run_official_model_onboard; then
+        log_info "官方模型配置完成。"
+    else
+        log_error "官方模型配置失败，请先执行: openclaw doctor --fix"
     fi
+    press_enter
+    return
     
     echo -e "${CYAN}选择 AI 提供商:${NC}"
     echo -e "${GRAY}提示: 支持自定义 API 地址（通过自定义 Provider 配置）${NC}"
@@ -3228,11 +3229,11 @@ config_google_antigravity() {
 
 # ================================ 渠道配置 ================================
 
-config_channels() {
+config_channels_official() {
     clear_screen
     print_header
     
-    echo -e "${WHITE}📱 消息渠道配置${NC}"
+    echo -e "${WHITE}📱 官方消息渠道插件（官方流程）${NC}"
     print_divider
     echo ""
     echo -e "${GRAY}详细文档: ~/.openclaw/docs/channels-configuration-guide.md${NC}"
@@ -3251,15 +3252,10 @@ config_channels() {
     print_menu_item "11" "LINE（官方插件）" "🟩"
     print_menu_item "12" "Nextcloud Talk（官方插件）" "☁️"
     print_menu_item "13" "更多官方渠道" "🧭"
-    print_menu_item "14" "钉钉/QQ/企业微信 官方状态检查" "🧾"
-    print_menu_item "15" "微信（LangBot WeChatPad，社区）" "🟢"
-    print_menu_item "16" "iMessage（旧版）" "🍎"
-    print_menu_item "17" "QQ（社区插件，可选）" "🐧"
-    print_menu_item "18" "企业微信（WeCom，社区插件）" "🏬"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
     
-    echo -en "${YELLOW}请选择 [0-18]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-13]: ${NC}"
     read choice < "$TTY_INPUT"
     
     case $choice in
@@ -3276,14 +3272,49 @@ config_channels() {
         11) config_line ;;
         12) config_nextcloud_talk ;;
         13) config_more_official_channels ;;
-        14) check_cn_enterprise_channel_official_status ;;
-        15) config_wechat ;;
-        16) config_imessage ;;
-        17) config_qq_community ;;
-        18) config_wecom_community ;;
         0) return ;;
-        *) log_error "无效选择"; press_enter; config_channels ;;
+        *) log_error "无效选择"; press_enter; config_channels_official ;;
     esac
+}
+
+config_channels_unofficial() {
+    clear_screen
+    print_header
+
+    echo -e "${WHITE}📱 非官方消息渠道配置${NC}"
+    print_divider
+    echo ""
+    echo -e "${YELLOW}说明: 以下为社区插件方案，请评估兼容性与安全性。${NC}"
+    echo -e "${GRAY}详细文档: ~/.openclaw/docs/channels-configuration-guide.md${NC}"
+    echo ""
+
+    print_menu_item "1" "微信（LangBot WeChatPad，社区）" "🟢"
+    print_menu_item "2" "QQ（社区插件）" "🐧"
+    print_menu_item "3" "企业微信（WeCom，社区插件）" "🏬"
+    print_menu_item "4" "钉钉（DingTalk，社区插件）" "📲"
+    print_menu_item "5" "钉钉/QQ/企业微信 官方状态检查" "🧾"
+    print_menu_item "6" "iMessage（旧版）" "🍎"
+    print_menu_item "0" "返回主菜单" "↩️"
+    echo ""
+
+    echo -en "${YELLOW}请选择 [0-6]: ${NC}"
+    read choice < "$TTY_INPUT"
+
+    case $choice in
+        1) config_wechat ;;
+        2) config_qq_community ;;
+        3) config_wecom_community ;;
+        4) config_dingtalk_community ;;
+        5) check_cn_enterprise_channel_official_status ;;
+        6) config_imessage ;;
+        0) return ;;
+        *) log_error "无效选择"; press_enter; config_channels_unofficial ;;
+    esac
+}
+
+# 兼容旧入口：默认跳转到非官方消息渠道配置
+config_channels() {
+    config_channels_unofficial
 }
 
 config_telegram() {
@@ -3973,6 +4004,204 @@ config_wecom_community() {
         1) config_wecom_community_setup ;;
         2) probe_wecom_community_config ;;
         3) rollback_wecom_community_config ;;
+        0) return ;;
+        *) log_error "无效选择" ;;
+    esac
+    press_enter
+}
+
+probe_dingtalk_community_config() {
+    echo ""
+    echo -e "${CYAN}━━━ 钉钉社区插件探针 ━━━${NC}"
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装，无法探针"
+        return 1
+    fi
+
+    local plugin_ok=false
+    local channel_ok=false
+    local client_id=""
+
+    if openclaw plugins list 2>/dev/null | grep -Eqi "dingtalk|openclaw-channel-dingtalk"; then
+        plugin_ok=true
+        log_info "DingTalk 插件已安装"
+    else
+        log_warn "未检测到 DingTalk 插件"
+    fi
+
+    if openclaw channels list 2>/dev/null | grep -qi "dingtalk"; then
+        channel_ok=true
+        log_info "DingTalk 渠道已注册"
+    else
+        log_warn "DingTalk 渠道未在 channels list 中出现"
+    fi
+
+    client_id="$(openclaw config get channels.dingtalk.accounts.main.clientId 2>/dev/null || true)"
+    if [ -n "$client_id" ] && [ "$client_id" != "undefined" ]; then
+        log_info "已检测到 clientId"
+    else
+        log_warn "未检测到 channels.dingtalk.accounts.main.clientId"
+    fi
+
+    echo ""
+    echo -e "${CYAN}诊断输出:${NC}"
+    openclaw doctor 2>&1 | head -10 | sed 's/^/  /'
+
+    if [ "$plugin_ok" = true ] && [ "$channel_ok" = true ]; then
+        log_info "DingTalk 配置探针通过"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${YELLOW}排障建议:${NC}"
+    echo "  1) openclaw doctor --fix"
+    echo "  2) openclaw plugins update --all"
+    echo "  3) 重新执行钉钉配置向导"
+    return 1
+}
+
+rollback_dingtalk_community_config() {
+    echo ""
+    echo -e "${WHITE}♻️ 回滚钉钉（DingTalk）社区配置${NC}"
+    print_divider
+    echo ""
+    echo -e "${YELLOW}将执行:${NC}"
+    echo "  • 禁用并卸载 DingTalk 社区插件"
+    echo "  • 清理 channels.dingtalk 与 plugins.allow 残留"
+    echo ""
+
+    if ! confirm "确认执行回滚？" "n"; then
+        log_info "已取消回滚"
+        return 0
+    fi
+
+    openclaw plugins disable dingtalk > /dev/null 2>&1 || true
+    openclaw plugins uninstall dingtalk --keep-files > /dev/null 2>&1 || true
+    openclaw plugins uninstall "$DINGTALK_PLUGIN_COMMUNITY" --keep-files > /dev/null 2>&1 || true
+
+    if openclaw config --help 2>/dev/null | grep -q "unset"; then
+        openclaw config unset channels.dingtalk > /dev/null 2>&1 || true
+        openclaw config unset plugins.entries.dingtalk > /dev/null 2>&1 || true
+    else
+        openclaw config set channels.dingtalk.enabled false > /dev/null 2>&1 || true
+    fi
+
+    remove_plugin_from_allow "dingtalk" || true
+    log_info "钉钉配置回滚完成"
+
+    if confirm "是否重启 Gateway 使回滚生效？" "y"; then
+        restart_gateway_for_channel
+    fi
+    return 0
+}
+
+config_dingtalk_community_setup() {
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        return 1
+    fi
+
+    ensure_openclaw_init
+
+    local plugin_version="${OPENCLAW_DINGTALK_PLUGIN_VERSION:-$DINGTALK_PLUGIN_VERSION_DEFAULT}"
+    local plugin_spec="${DINGTALK_PLUGIN_COMMUNITY}@${plugin_version}"
+    local client_id=""
+    local client_secret=""
+    local robot_code=""
+    local allow_input=""
+    local group_allow_input=""
+
+    echo -e "${YELLOW}⚠️ 风险提示:${NC}"
+    echo "  • 钉钉当前不是官方渠道，依赖社区插件"
+    echo "  • 本安装器固定版本安装，避免 latest 漂移"
+    echo ""
+
+    if ! confirm "继续安装并配置钉钉社区插件？" "n"; then
+        log_info "已取消钉钉配置"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${CYAN}安装插件: ${WHITE}${plugin_spec}${NC}"
+    if openclaw plugins install "$plugin_spec" --pin; then
+        log_info "钉钉社区插件安装成功"
+    else
+        log_warn "插件安装失败，尝试继续使用已安装版本"
+        if ! openclaw plugins list 2>/dev/null | grep -Eqi "dingtalk|openclaw-channel-dingtalk"; then
+            log_error "未检测到 dingtalk 插件，无法继续"
+            return 1
+        fi
+    fi
+
+    openclaw plugins enable dingtalk > /dev/null 2>&1 || true
+    ensure_plugin_in_allow "dingtalk"
+    openclaw channels add --channel dingtalk > /dev/null 2>&1 || true
+
+    echo ""
+    echo -e "${CYAN}请输入钉钉凭据（Open Platform）${NC}"
+    read_input "${YELLOW}AppKey / ClientId: ${NC}" client_id
+    read_secret_input "${YELLOW}AppSecret / ClientSecret: ${NC}" client_secret
+    read_input "${YELLOW}robotCode（可留空）: ${NC}" robot_code
+    read_input "${YELLOW}allowFrom 用户白名单（逗号分隔，可留空）: ${NC}" allow_input
+    read_input "${YELLOW}groupAllowFrom 群白名单（逗号分隔，可留空）: ${NC}" group_allow_input
+
+    if [ -z "$client_id" ] || [ -z "$client_secret" ]; then
+        log_error "clientId / clientSecret 不能为空"
+        return 1
+    fi
+
+    openclaw config set channels.dingtalk.enabled true > /dev/null 2>&1 || true
+    openclaw config set channels.dingtalk.accounts.main.enabled true > /dev/null 2>&1 || true
+    openclaw config set channels.dingtalk.accounts.main.clientId "$client_id" > /dev/null 2>&1 || true
+    openclaw config set channels.dingtalk.accounts.main.clientSecret "$client_secret" > /dev/null 2>&1 || true
+    [ -n "$robot_code" ] && openclaw config set channels.dingtalk.accounts.main.robotCode "$robot_code" > /dev/null 2>&1 || true
+
+    # 顶层兼容字段（部分插件版本可能读取该路径）
+    openclaw config set channels.dingtalk.clientId "$client_id" > /dev/null 2>&1 || true
+    openclaw config set channels.dingtalk.clientSecret "$client_secret" > /dev/null 2>&1 || true
+    [ -n "$robot_code" ] && openclaw config set channels.dingtalk.robotCode "$robot_code" > /dev/null 2>&1 || true
+
+    if [ -n "$allow_input" ]; then
+        local allow_json
+        allow_json="$(build_json_array_from_csv "$allow_input")"
+        openclaw config set channels.dingtalk.accounts.main.allowFrom "$allow_json" > /dev/null 2>&1 || true
+    fi
+
+    if [ -n "$group_allow_input" ]; then
+        local group_allow_json
+        group_allow_json="$(build_json_array_from_csv "$group_allow_input")"
+        openclaw config set channels.dingtalk.accounts.main.groupAllowFrom "$group_allow_json" > /dev/null 2>&1 || true
+    fi
+
+    log_info "钉钉社区渠道配置完成"
+    if confirm "是否立即执行钉钉配置探针？" "y"; then
+        probe_dingtalk_community_config || true
+    fi
+    if confirm "是否重启 Gateway 使配置生效？" "y"; then
+        restart_gateway_for_channel
+    fi
+    return 0
+}
+
+config_dingtalk_community() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}📲 钉钉（DingTalk，社区插件）${NC}"
+    print_divider
+    echo ""
+    echo "  1) 安装并配置钉钉社区插件"
+    echo "  2) 钉钉配置探针"
+    echo "  3) 回滚钉钉配置"
+    echo "  0) 返回"
+    echo ""
+    read_input "${YELLOW}请选择 [0-3]: ${NC}" dingtalk_choice
+
+    case "$dingtalk_choice" in
+        1) config_dingtalk_community_setup ;;
+        2) probe_dingtalk_community_config ;;
+        3) rollback_dingtalk_community_config ;;
         0) return ;;
         *) log_error "无效选择" ;;
     esac
@@ -4936,10 +5165,12 @@ config_security() {
     print_menu_item "3" "允许网络浏览" "🌐"
     print_menu_item "4" "沙箱模式 (推荐开启)" "📦"
     print_menu_item "5" "配置白名单" "✅"
+    print_menu_item "6" "Boot-MD 启动记忆（官方能力）" "🧠"
+    print_menu_item "7" "Session-Memory 会话记忆（官方能力）" "💾"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
     
-    echo -en "${YELLOW}请选择 [0-5]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-7]: ${NC}"
     read choice < "$TTY_INPUT"
     
     case $choice in
@@ -4986,6 +5217,30 @@ config_security() {
         5)
             config_whitelist
             ;;
+        6)
+            local enable_bootmd="false"
+            if confirm "启用 Boot-MD 启动记忆？" "y"; then
+                enable_bootmd="true"
+            fi
+            if check_openclaw_installed; then
+                openclaw config set "boot-md.enabled" "$enable_bootmd" 2>/dev/null || true
+                openclaw config set "boot_md.enabled" "$enable_bootmd" 2>/dev/null || true
+                openclaw config set "memory.boot.enabled" "$enable_bootmd" 2>/dev/null || true
+            fi
+            [ "$enable_bootmd" = "true" ] && log_info "已启用 Boot-MD" || log_info "已禁用 Boot-MD"
+            ;;
+        7)
+            local enable_session_memory="false"
+            if confirm "启用 Session-Memory 会话记忆？" "y"; then
+                enable_session_memory="true"
+            fi
+            if check_openclaw_installed; then
+                openclaw config set "session-memory.enabled" "$enable_session_memory" 2>/dev/null || true
+                openclaw config set "session_memory.enabled" "$enable_session_memory" 2>/dev/null || true
+                openclaw config set "memory.session.enabled" "$enable_session_memory" 2>/dev/null || true
+            fi
+            [ "$enable_session_memory" = "true" ] && log_info "已启用 Session-Memory" || log_info "已禁用 Session-Memory"
+            ;;
         0)
             return
             ;;
@@ -5020,6 +5275,166 @@ config_whitelist() {
         openclaw config set security.allowed_paths "$paths" 2>/dev/null
         log_info "白名单配置已保存"
     fi
+}
+
+# ================================ Skills 管理 ================================
+
+get_config_menu_script_dir() {
+    cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
+}
+
+sync_default_skills_bundle() {
+    local force_update="${1:-0}"
+    local script_dir
+    script_dir="$(get_config_menu_script_dir)"
+    local bundle_dir="$script_dir/skills/default"
+    local target_dir="$CONFIG_DIR/skills"
+    local copied=0
+    local skipped=0
+
+    if [ ! -d "$bundle_dir" ]; then
+        log_error "未找到默认技能包目录: $bundle_dir"
+        return 1
+    fi
+
+    mkdir -p "$target_dir"
+
+    local src
+    for src in "$bundle_dir"/*; do
+        [ -d "$src" ] || continue
+        local name
+        local dst
+        name="$(basename "$src")"
+        dst="$target_dir/$name"
+
+        if [ -d "$dst" ] && [ "$force_update" != "1" ]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        rm -rf "$dst" 2>/dev/null || true
+        if cp -a "$src" "$dst" 2>/dev/null; then
+            copied=$((copied + 1))
+        fi
+    done
+
+    log_info "默认技能包同步完成：新增/更新 ${copied}，保留 ${skipped}"
+    return 0
+}
+
+list_installed_skills() {
+    local skills_dir="$CONFIG_DIR/skills"
+    if [ ! -d "$skills_dir" ]; then
+        echo "  (暂无技能目录)"
+        return 0
+    fi
+
+    local skills
+    skills="$(find "$skills_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; | sort)"
+    if [ -z "$skills" ]; then
+        echo "  (暂无已安装技能)"
+        return 0
+    fi
+    echo "$skills" | sed 's/^/  - /'
+}
+
+add_skill_from_local_path() {
+    local source_path=""
+    local target_dir="$CONFIG_DIR/skills"
+    local skill_name=""
+
+    read_input "${YELLOW}输入本地技能目录路径（包含 SKILL.md）: ${NC}" source_path
+    source_path="${source_path/#\~/$HOME}"
+
+    if [ -z "$source_path" ] || [ ! -d "$source_path" ]; then
+        log_error "目录不存在: $source_path"
+        return 1
+    fi
+    if [ ! -f "$source_path/SKILL.md" ]; then
+        log_error "该目录缺少 SKILL.md，不是有效技能目录"
+        return 1
+    fi
+
+    skill_name="$(basename "$source_path")"
+    mkdir -p "$target_dir"
+    if [ -d "$target_dir/$skill_name" ]; then
+        if ! confirm "技能 ${skill_name} 已存在，是否覆盖？" "n"; then
+            log_info "已取消添加"
+            return 0
+        fi
+        rm -rf "$target_dir/$skill_name" 2>/dev/null || true
+    fi
+
+    cp -a "$source_path" "$target_dir/$skill_name"
+    log_info "技能已添加: $skill_name"
+}
+
+remove_installed_skill() {
+    local skill_name=""
+    local target_dir="$CONFIG_DIR/skills"
+    list_installed_skills
+    echo ""
+    read_input "${YELLOW}输入要删除的技能名: ${NC}" skill_name
+    if [ -z "$skill_name" ]; then
+        log_error "技能名不能为空"
+        return 1
+    fi
+    if [ ! -d "$target_dir/$skill_name" ]; then
+        log_error "技能不存在: $skill_name"
+        return 1
+    fi
+    if ! confirm "确认删除技能 ${skill_name}？" "n"; then
+        log_info "已取消删除"
+        return 0
+    fi
+    rm -rf "$target_dir/$skill_name"
+    log_info "技能已删除: $skill_name"
+}
+
+manage_skills() {
+    clear_screen
+    print_header
+
+    echo -e "${WHITE}🧩 Skills 管理${NC}"
+    print_divider
+    echo ""
+    print_menu_item "1" "查看已安装 Skills" "📋"
+    print_menu_item "2" "安装默认技能包（仅补齐缺失）" "📦"
+    print_menu_item "3" "强制更新默认技能包（覆盖同名）" "🔄"
+    print_menu_item "4" "从本地目录添加 Skill" "➕"
+    print_menu_item "5" "删除已安装 Skill" "🗑️"
+    print_menu_item "0" "返回主菜单" "↩️"
+    echo ""
+    read_input "${YELLOW}请选择 [0-5]: ${NC}" skills_choice
+
+    case "$skills_choice" in
+        1)
+            echo ""
+            echo -e "${CYAN}当前已安装 Skills:${NC}"
+            list_installed_skills
+            ;;
+        2)
+            sync_default_skills_bundle 0
+            ;;
+        3)
+            sync_default_skills_bundle 1
+            ;;
+        4)
+            add_skill_from_local_path
+            ;;
+        5)
+            remove_installed_skill
+            ;;
+        0)
+            return
+            ;;
+        *)
+            log_error "无效选择"
+            ;;
+    esac
+
+    press_enter
+    manage_skills
 }
 
 # ================================ 服务管理 ================================
@@ -7156,14 +7571,16 @@ show_main_menu() {
     echo ""
     
     print_menu_item "1" "系统状态" "📊"
-    print_menu_item "2" "AI 模型配置" "🤖"
-    print_menu_item "3" "消息渠道配置" "📱"
-    print_menu_item "4" "身份与个性配置" "👤"
+    print_menu_item "2" "AI 模型配置（官方）" "🤖"
+    print_menu_item "3" "官方消息渠道插件（官方）" "📡"
+    print_menu_item "4" "非官方消息渠道配置（社区）" "📱"
     print_menu_item "5" "安全设置" "🔒"
-    print_menu_item "6" "服务管理" "⚡"
+    print_menu_item "6" "Skills 管理" "🧩"
     print_menu_item "7" "快速测试" "🧪"
     print_menu_item "8" "高级设置" "🔧"
     print_menu_item "9" "查看当前配置" "📋"
+    print_menu_item "10" "身份与个性配置" "👤"
+    print_menu_item "11" "服务管理" "⚡"
     echo ""
     print_menu_item "0" "退出" "🚪"
     echo ""
@@ -7186,10 +7603,22 @@ main() {
             echo -e "${CYAN}模型配置流程结束。${NC}"
             exit 0
             ;;
-        --channels-only)
-            config_channels
+        --official-channels-only)
+            config_channels_official
             echo ""
-            echo -e "${CYAN}消息渠道配置流程结束。${NC}"
+            echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
+            exit 0
+            ;;
+        --community-channels-only)
+            config_channels_unofficial
+            echo ""
+            echo -e "${CYAN}非官方消息渠道配置流程结束。${NC}"
+            exit 0
+            ;;
+        --channels-only)
+            config_channels_unofficial
+            echo ""
+            echo -e "${CYAN}非官方消息渠道配置流程结束。${NC}"
             exit 0
             ;;
     esac
@@ -7197,7 +7626,7 @@ main() {
     # 主循环
     while true; do
         show_main_menu
-        echo -en "${YELLOW}请选择 [0-9]: ${NC}"
+        echo -en "${YELLOW}请选择 [0-11]: ${NC}"
         if ! read choice < "$TTY_INPUT"; then
             echo ""
             log_error "无法读取输入（TTY 不可用），退出配置菜单。"
@@ -7207,13 +7636,15 @@ main() {
         case $choice in
             1) show_status ;;
             2) config_ai_model ;;
-            3) config_channels ;;
-            4) config_identity ;;
+            3) config_channels_official ;;
+            4) config_channels_unofficial ;;
             5) config_security ;;
-            6) manage_service ;;
+            6) manage_skills ;;
             7) quick_test_menu ;;
             8) advanced_settings ;;
             9) view_config ;;
+            10) config_identity ;;
+            11) manage_service ;;
             0)
                 echo ""
                 echo -e "${CYAN}再见！🦞${NC}"
