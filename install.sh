@@ -694,6 +694,19 @@ is_low_memory_linux() {
     [ "$mem_mb" -lt "$SWAP_THRESHOLD_MB" ] && [ "$swap_mb" -lt "$target_swap_mb" ]
 }
 
+has_minimum_swap_for_low_memory() {
+    [ "$(uname -s 2>/dev/null || true)" = "Linux" ] || return 0
+    local mem_mb swap_mb target_swap_mb
+    mem_mb="$(get_total_mem_mb)"
+    swap_mb="$(get_total_swap_mb)"
+    target_swap_mb="$(get_recommended_swap_mb "$mem_mb")"
+
+    if [ "$mem_mb" -ge "$SWAP_THRESHOLD_MB" ]; then
+        return 0
+    fi
+    [ "$swap_mb" -ge "$target_swap_mb" ]
+}
+
 get_recommended_swap_mb() {
     local mem_mb="${1:-0}"
     local override="${SWAP_TARGET_MB:-0}"
@@ -773,7 +786,9 @@ ensure_swap_for_install() {
         if [ "$primary_size_mb" -lt 1024 ]; then
             primary_size_mb=1024
         fi
-        create_and_enable_swapfile "$primary_swap_file" "$primary_size_mb"
+        if ! create_and_enable_swapfile "$primary_swap_file" "$primary_size_mb"; then
+            log_warn "创建/启用 Swap 失败: $primary_swap_file"
+        fi
         log_info "已启用 Swap: $primary_swap_file (${primary_size_mb}MB)"
     else
         log_info "检测到已启用 Swap: $primary_swap_file"
@@ -785,12 +800,15 @@ ensure_swap_for_install() {
         if [ "$missing_swap_mb" -lt 512 ]; then
             missing_swap_mb=512
         fi
-        create_and_enable_swapfile "$extra_swap_file" "$missing_swap_mb"
+        if ! create_and_enable_swapfile "$extra_swap_file" "$missing_swap_mb"; then
+            log_warn "补充 Swap 失败: $extra_swap_file"
+        fi
         log_info "已补充 Swap: $extra_swap_file (${missing_swap_mb}MB)"
     fi
 
     log_info "当前总 Swap: $(get_total_swap_mb)MB"
-    return 0
+    has_minimum_swap_for_low_memory
+    return $?
 }
 
 is_oom_like_failure() {
@@ -813,7 +831,7 @@ npm_install_openclaw_with_fallback() {
     log_step "执行 npm 回退安装..."
     log1="$(mktemp /tmp/openclaw-npm-fallback.XXXXXX.log)"
     set +e
-    env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm --loglevel error --no-fund --no-audit install -g "$spec" --unsafe-perm >"$log1" 2>&1
+    env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm_config_jobs=1 npm_config_maxsockets=1 npm_config_progress=false UV_THREADPOOL_SIZE=1 NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=512" npm --loglevel error --no-fund --no-audit install -g "$spec" --unsafe-perm >"$log1" 2>&1
     exit_code=$?
     set -e
     if [ $exit_code -eq 0 ]; then
@@ -828,14 +846,14 @@ npm_install_openclaw_with_fallback() {
         ensure_swap_for_install || true
     fi
 
-    node_opts="--max-old-space-size=512"
+    node_opts="--max-old-space-size=384"
     if [ -n "${NODE_OPTIONS:-}" ]; then
         node_opts="${NODE_OPTIONS} ${node_opts}"
     fi
 
     log2="$(mktemp /tmp/openclaw-npm-fallback.XXXXXX.log)"
     set +e
-    env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm_config_jobs=1 npm_config_progress=false NODE_OPTIONS="$node_opts" npm --loglevel error --no-fund --no-audit install -g "$spec" --unsafe-perm >"$log2" 2>&1
+    env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm_config_jobs=1 npm_config_maxsockets=1 npm_config_progress=false UV_THREADPOOL_SIZE=1 NODE_OPTIONS="$node_opts" npm --loglevel error --no-fund --no-audit install -g "$spec" --unsafe-perm >"$log2" 2>&1
     exit_code=$?
     set -e
     if [ $exit_code -eq 0 ]; then
@@ -939,17 +957,44 @@ install_openclaw() {
     fi
 
     # 低内存机器优先补齐 Swap，降低 npm 安装被 OOM Kill 的概率
-    ensure_swap_for_install || true
+    local low_mem_mode=0
+    if is_low_memory_linux; then
+        low_mem_mode=1
+    fi
 
-    if ! install_openclaw_via_official; then
-        if [ "$INSTALL_METHOD" != "npm" ]; then
-            log_error "官方安装器执行失败，且当前为 git 安装模式，无法安全回退"
+    if [ "$low_mem_mode" -eq 1 ]; then
+        log_warn "检测到低内存安装场景，将优先使用内存优化安装流程。"
+        if ! ensure_swap_for_install; then
+            local mem_mb swap_mb target_swap_mb
+            mem_mb="$(get_total_mem_mb)"
+            swap_mb="$(get_total_swap_mb)"
+            target_swap_mb="$(get_recommended_swap_mb "$mem_mb")"
+            log_error "当前内存 ${mem_mb}MB，Swap ${swap_mb}MB，低于建议目标 ${target_swap_mb}MB。"
+            log_error "继续安装大概率被 OOM Killer 终止。"
+            if [ "$NO_PROMPT" = "1" ] || ! confirm "是否仍要继续安装（不推荐）？" "n"; then
+                echo ""
+                echo -e "${YELLOW}请先启用 Swap 后重试:${NC}"
+                echo "  sudo fallocate -l 4G /swapfile.openclaw || sudo dd if=/dev/zero of=/swapfile.openclaw bs=1M count=4096"
+                echo "  sudo chmod 600 /swapfile.openclaw && sudo mkswap /swapfile.openclaw && sudo swapon /swapfile.openclaw"
+                exit 1
+            fi
+        fi
+
+        if ! npm_install_openclaw_with_fallback; then
+            log_error "内存优化安装流程失败"
             exit 1
         fi
-        log_warn "官方安装器执行失败，回退到 npm 安装"
-        if ! npm_install_openclaw_with_fallback; then
-            log_error "OpenClaw 回退安装失败"
-            exit 1
+    else
+        if ! install_openclaw_via_official; then
+            if [ "$INSTALL_METHOD" != "npm" ]; then
+                log_error "官方安装器执行失败，且当前为 git 安装模式，无法安全回退"
+                exit 1
+            fi
+            log_warn "官方安装器执行失败，回退到 npm 安装"
+            if ! npm_install_openclaw_with_fallback; then
+                log_error "OpenClaw 回退安装失败"
+                exit 1
+            fi
         fi
     fi
     
