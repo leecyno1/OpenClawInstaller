@@ -654,89 +654,142 @@ get_port_pid() {
     echo "$pid"
 }
 
+run_with_optional_sudo() {
+    if [ "$EUID" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        "$@"
+    fi
+}
+
+cleanup_legacy_gateway_runtime_menu() {
+    # 清理历史自定义服务 openclaw.service，避免与官方 gateway 服务并行运行
+    if command -v systemctl >/dev/null 2>&1; then
+        if [ -f /etc/systemd/system/openclaw.service ] || systemctl list-unit-files 2>/dev/null | grep -q '^openclaw\.service'; then
+            log_warn "检测到遗留 openclaw.service，正在停用..."
+            run_with_optional_sudo systemctl disable --now openclaw.service >/dev/null 2>&1 || true
+            run_with_optional_sudo systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+    fi
+
+    openclaw gateway stop >/dev/null 2>&1 || true
+
+    if command -v pkill >/dev/null 2>&1; then
+        pkill -f "openclaw-gateway" >/dev/null 2>&1 || true
+        pkill -f "openclaw gateway" >/dev/null 2>&1 || true
+    fi
+}
+
+install_official_gateway_service_menu() {
+    local gateway_port="$1"
+    local log_file
+    log_file="$(mktemp /tmp/openclaw-gateway-install.XXXXXX.log)"
+
+    if openclaw gateway install --force --port "$gateway_port" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if openclaw gateway install --force >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if openclaw gateway install >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+
+    log_error "官方 Gateway 服务安装失败"
+    tail -20 "$log_file" 2>/dev/null | sed 's/^/  /'
+    rm -f "$log_file" 2>/dev/null || true
+    return 1
+}
+
+converge_gateway_single_instance_menu() {
+    local gateway_port="${1:-$(get_gateway_port)}"
+    local gateway_host="${2:-$(get_gateway_host)}"
+    local restart_output=""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        return 1
+    fi
+
+    openclaw config set gateway.mode local >/dev/null 2>&1 || true
+    openclaw config set gateway.host "$gateway_host" >/dev/null 2>&1 || true
+    openclaw config set gateway.port "$gateway_port" >/dev/null 2>&1 || true
+    openclaw config set gateway.bind "$gateway_host:$gateway_port" >/dev/null 2>&1 || true
+    upsert_env_export "OPENCLAW_GATEWAY_HOST" "$gateway_host"
+    upsert_env_export "OPENCLAW_GATEWAY_PORT" "$gateway_port"
+
+    cleanup_legacy_gateway_runtime_menu
+    yes | openclaw doctor --fix >/dev/null 2>&1 || true
+
+    if ! install_official_gateway_service_menu "$gateway_port"; then
+        return 1
+    fi
+
+    restart_output="$(openclaw gateway restart 2>&1)" || true
+    sleep 2
+
+    local gateway_pid
+    gateway_pid="$(get_port_pid "$gateway_port")"
+    if [ -z "$gateway_pid" ]; then
+        restart_output="$(openclaw gateway start 2>&1)" || true
+        sleep 2
+        gateway_pid="$(get_port_pid "$gateway_port")"
+    fi
+
+    if [ -z "$gateway_pid" ]; then
+        log_error "Gateway 启动失败（目标端口: ${gateway_port}）"
+        echo "$restart_output" | head -15 | sed 's/^/  /'
+        return 1
+    fi
+
+    log_info "Gateway 单实例运行中 (PID: $gateway_pid, ${gateway_host}:${gateway_port})"
+    return 0
+}
+
 # 重启 Gateway 使渠道配置生效
 restart_gateway_for_channel() {
     echo ""
-    log_info "正在重启 Gateway..."
-    local gateway_port
+    log_info "正在重启 Gateway（单实例收敛）..."
+    local gateway_port gateway_host
     gateway_port="$(get_gateway_port)"
-    
-    # 加载环境变量
-    if [ -f "$OPENCLAW_ENV" ]; then
-        source "$OPENCLAW_ENV"
+    gateway_host="$(get_gateway_host)"
+
+    if ! converge_gateway_single_instance_menu "$gateway_port" "$gateway_host"; then
+        echo ""
+        echo -e "${CYAN}建议:${NC}"
+        echo "  • 运行 ${WHITE}openclaw doctor --fix${NC} 修复配置问题"
+        echo "  • 运行 ${WHITE}openclaw gateway status${NC} 查看服务状态"
+        return 1
     fi
-    
-    # 先运行 doctor --fix 确保配置有效
-    echo -e "${YELLOW}检查配置...${NC}"
-    yes | openclaw doctor --fix > /dev/null 2>&1 || true
-    
-    # 使用官方 restart 命令
-    local restart_output
-    restart_output=$(openclaw gateway restart 2>&1) || true
-    
-    sleep 2
-    
-    # 使用端口检测判断服务是否启动成功（更可靠）
-    local gateway_pid
-    gateway_pid=$(get_gateway_pid)
-    
-    if [ -n "$gateway_pid" ]; then
-        log_info "Gateway 已重启！(PID: $gateway_pid)"
+
+    echo ""
+    echo -e "${CYAN}━━━ 获取 Dashboard URL ━━━${NC}"
+    local dashboard_url
+    dashboard_url="$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)"
+    if [ -n "$dashboard_url" ]; then
         echo ""
-        
-        # 获取并显示 Dashboard URL（带 token）
-        echo -e "${CYAN}━━━ 获取 Dashboard URL ━━━${NC}"
-        local dashboard_url=$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)
-        if [ -n "$dashboard_url" ]; then
-            echo ""
-            echo -e "${GREEN}✓ Dashboard URL (带授权 token):${NC}"
-            echo -e "  ${WHITE}$dashboard_url${NC}"
-            echo ""
-            echo -e "${YELLOW}⚠️  请使用此 URL 访问控制界面，否则会提示 token_missing${NC}"
-        else
-            echo ""
-            echo -e "${YELLOW}提示: 运行以下命令获取带 token 的 Dashboard URL:${NC}"
-            echo -e "  ${WHITE}openclaw dashboard${NC}"
-        fi
+        echo -e "${GREEN}✓ Dashboard URL (带授权 token):${NC}"
+        echo -e "  ${WHITE}$dashboard_url${NC}"
         echo ""
-        echo -e "${CYAN}查看日志: ${WHITE}openclaw logs --follow${NC}"
-        echo -e "${CYAN}停止服务: ${WHITE}openclaw gateway stop${NC}"
-        
-        # 渠道状态探针（重启后）
-        echo ""
-        echo -e "${CYAN}━━━ 渠道状态探针 ━━━${NC}"
-        openclaw channels list 2>/dev/null | head -12 | sed 's/^/  /' || echo "  (无法获取渠道状态)"
+        echo -e "${YELLOW}⚠️  请使用此 URL 访问控制界面，否则会提示 token_missing${NC}"
     else
-        log_warn "Gateway 可能未正常启动"
         echo ""
-        echo -e "${YELLOW}命令输出:${NC}"
-        echo "$restart_output" | head -10 | sed 's/^/  /'
-        echo ""
-        log_info "尝试按配置端口 ${gateway_port} 直接拉起 Gateway..."
-        if command -v setsid &> /dev/null; then
-            if [ -f "$OPENCLAW_ENV" ]; then
-                setsid bash -c "source $OPENCLAW_ENV && exec openclaw gateway --port ${gateway_port}" > /tmp/openclaw-gateway.log 2>&1 &
-            else
-                setsid openclaw gateway --port "${gateway_port}" > /tmp/openclaw-gateway.log 2>&1 &
-            fi
-        else
-            if [ -f "$OPENCLAW_ENV" ]; then
-                nohup bash -c "source $OPENCLAW_ENV && exec openclaw gateway --port ${gateway_port}" > /tmp/openclaw-gateway.log 2>&1 &
-            else
-                nohup openclaw gateway --port "${gateway_port}" > /tmp/openclaw-gateway.log 2>&1 &
-            fi
-            disown 2>/dev/null || true
-        fi
-        sleep 2
-        gateway_pid="$(get_gateway_pid)"
-        if [ -n "$gateway_pid" ]; then
-            log_info "按端口 ${gateway_port} 启动成功 (PID: $gateway_pid)"
-        else
-            echo -e "${CYAN}建议:${NC}"
-            echo "  • 运行 ${WHITE}openclaw doctor --fix${NC} 修复配置问题"
-            echo "  • 运行 ${WHITE}openclaw gateway --port ${gateway_port}${NC} 手动启动"
-        fi
+        echo -e "${YELLOW}提示: 运行以下命令获取带 token 的 Dashboard URL:${NC}"
+        echo -e "  ${WHITE}openclaw dashboard${NC}"
     fi
+    echo ""
+    echo -e "${CYAN}查看日志: ${WHITE}openclaw logs --follow${NC}"
+    echo -e "${CYAN}停止服务: ${WHITE}openclaw gateway stop${NC}"
+
+    echo ""
+    echo -e "${CYAN}━━━ 渠道状态探针 ━━━${NC}"
+    openclaw channels list 2>/dev/null | head -12 | sed 's/^/  /' || echo "  (无法获取渠道状态)"
+    return 0
 }
 
 # 检查 OpenClaw Gateway 是否运行
@@ -5463,10 +5516,10 @@ remove_openclaw_system_services() {
 
     if [ -f "/etc/systemd/system/openclaw.service" ]; then
         log_info "移除 systemd 系统服务..."
-        sudo systemctl stop openclaw 2>/dev/null || true
-        sudo systemctl disable openclaw 2>/dev/null || true
-        sudo rm -f /etc/systemd/system/openclaw.service 2>/dev/null || true
-        sudo systemctl daemon-reload 2>/dev/null || true
+        run_with_optional_sudo systemctl stop openclaw 2>/dev/null || true
+        run_with_optional_sudo systemctl disable openclaw 2>/dev/null || true
+        run_with_optional_sudo rm -f /etc/systemd/system/openclaw.service 2>/dev/null || true
+        run_with_optional_sudo systemctl daemon-reload 2>/dev/null || true
     fi
 }
 
@@ -5620,172 +5673,30 @@ manage_service() {
         1)
             echo ""
             if check_openclaw_installed; then
-                # 先检查服务是否已经在运行（使用端口检测，更可靠）
-                local port
+                local port host running_pid
+                host="$(get_gateway_host)"
                 port="$(get_gateway_port)"
-                local running_pid
-                running_pid=$(get_port_pid "$port")
-                
+                running_pid="$(get_port_pid "$port")"
+
                 if [ -n "$running_pid" ]; then
-                    echo -e "${GREEN}✓ 服务已经在运行中！${NC} (PID: $running_pid)"
-                    echo ""
-                    
-                    # 获取并显示 Dashboard URL
-                    local dashboard_url=$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)
-                    if [ -n "$dashboard_url" ]; then
-                        echo -e "${GREEN}Dashboard URL (带授权 token):${NC}"
-                        echo -e "  ${WHITE}$dashboard_url${NC}"
-                    else
-                        echo -e "${YELLOW}提示: 运行 ${WHITE}openclaw dashboard${NC} 获取访问 URL"
-                    fi
-                    echo ""
-                    
-                    if confirm "是否重启服务？" "n"; then
-                        # 使用官方 restart 命令
-                        if [ -f "$OPENCLAW_ENV" ]; then
-                            source "$OPENCLAW_ENV"
-                        fi
-                        openclaw gateway restart 2>&1 | head -5
-                        sleep 2
-                        log_info "服务已重启"
-                    fi
-                    
-                    press_enter
-                    manage_service
-                    return
-                fi
-                
-                # 检测端口是否被其他进程占用
-                local port_pid
-                port_pid=$(get_port_pid "$port")
-                
-                if [ -n "$port_pid" ]; then
-                    echo -e "${YELLOW}检测到端口 $port 被其他进程占用 (PID: $port_pid)${NC}"
-                    if confirm "是否停止占用端口的进程？" "y"; then
-                        openclaw gateway stop > /dev/null 2>&1 || true
-                        sleep 1
-                        port_pid=$(get_port_pid "$port")
-                        if [ -n "$port_pid" ]; then
-                            kill -9 $port_pid 2>/dev/null || true
-                            sleep 1
-                        fi
-                        log_info "已清理端口占用"
-                    else
-                        log_warn "端口被占用，无法启动新服务"
+                    log_info "服务已在运行 (PID: $running_pid, ${host}:${port})"
+                    if ! confirm "是否执行单实例收敛并重启（推荐）？" "y"; then
                         press_enter
                         manage_service
                         return
                     fi
                 fi
-                
-                # 确保基础配置正确
-                ensure_openclaw_init
-                
-                # 加载环境变量
-                if [ -f "$OPENCLAW_ENV" ]; then
-                    source "$OPENCLAW_ENV"
-                    log_info "已加载环境变量"
-                fi
-                
-                # 先运行 doctor --fix 确保配置有效（与重启保持一致）
-                log_info "检查并修复配置..."
-                yes | openclaw doctor --fix > /dev/null 2>&1 || true
-                
-                # 验证修复后的配置
-                local config_check=$(openclaw doctor 2>&1 | head -5)
-                if echo "$config_check" | grep -qi "Config invalid"; then
-                    log_error "配置无效，无法自动修复"
+
+                if converge_gateway_single_instance_menu "$port" "$host"; then
+                    local dashboard_url
+                    dashboard_url="$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)"
                     echo ""
-                    echo -e "${YELLOW}错误详情:${NC}"
-                    echo "$config_check" | head -10
-                    echo ""
-                    echo -e "${CYAN}请手动运行: openclaw doctor --fix${NC}"
-                    press_enter
-                    manage_service
-                    return
-                fi
-                
-                log_info "正在启动服务..."
-                
-                # 后台启动 Gateway（使用 setsid 完全脱离终端）
-                if command -v setsid &> /dev/null; then
-                    if [ -f "$OPENCLAW_ENV" ]; then
-                        setsid bash -c "source $OPENCLAW_ENV && exec openclaw gateway --port ${port}" > /tmp/openclaw-gateway.log 2>&1 &
-                    else
-                        setsid openclaw gateway --port "${port}" > /tmp/openclaw-gateway.log 2>&1 &
-                    fi
-                else
-                    # 备用方案：nohup + disown
-                    if [ -f "$OPENCLAW_ENV" ]; then
-                        nohup bash -c "source $OPENCLAW_ENV && exec openclaw gateway --port ${port}" > /tmp/openclaw-gateway.log 2>&1 &
-                    else
-                        nohup openclaw gateway --port "${port}" > /tmp/openclaw-gateway.log 2>&1 &
-                    fi
-                    disown 2>/dev/null || true
-                fi
-                
-                # 等待服务启动，多次检测端口
-                local gateway_pid=""
-                local check_count=0
-                while [ $check_count -lt 5 ]; do
-                    sleep 1
-                    gateway_pid=$(get_gateway_pid)
-                    if [ -n "$gateway_pid" ]; then
-                        break
-                    fi
-                    check_count=$((check_count + 1))
-                done
-                
-                # 最终检测：只要端口有服务就是成功（无论是刚启动的还是之前已运行的）
-                if [ -n "$gateway_pid" ]; then
-                    log_info "服务运行中 (PID: $gateway_pid)"
-                    echo ""
-                    
-                    # 获取并显示 Dashboard URL（带 token）
-                    echo -e "${CYAN}━━━ 获取 Dashboard URL ━━━${NC}"
-                    local dashboard_url=$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)
                     if [ -n "$dashboard_url" ]; then
-                        echo ""
                         echo -e "${GREEN}✓ Dashboard URL (带授权 token):${NC}"
                         echo -e "  ${WHITE}$dashboard_url${NC}"
-                        echo ""
-                        echo -e "${YELLOW}⚠️  请使用此 URL 访问控制界面${NC}"
                     else
-                        echo ""
-                        echo -e "${YELLOW}提示: 运行以下命令获取带 token 的 Dashboard URL:${NC}"
-                        echo -e "  ${WHITE}openclaw dashboard${NC}"
+                        echo -e "${YELLOW}提示: 运行 ${WHITE}openclaw dashboard${NC} 获取访问 URL"
                     fi
-                    
-                    echo ""
-                    echo -e "${CYAN}日志文件: /tmp/openclaw-gateway.log${NC}"
-                    # 显示最近的日志
-                    if [ -s /tmp/openclaw-gateway.log ]; then
-                        echo ""
-                        echo -e "${GRAY}最近日志:${NC}"
-                        tail -5 /tmp/openclaw-gateway.log 2>/dev/null | sed 's/^/  /'
-                    fi
-                else
-                    log_error "启动失败，端口 ${port} 无服务监听"
-                    echo ""
-                    
-                    # 显示日志文件内容
-                    if [ -s /tmp/openclaw-gateway.log ]; then
-                        echo -e "${YELLOW}错误日志:${NC}"
-                        tail -15 /tmp/openclaw-gateway.log 2>/dev/null | sed 's/^/  /'
-                    fi
-                    
-                    echo ""
-                    echo -e "${CYAN}━━━ 诊断信息 ━━━${NC}"
-                    echo ""
-                    
-                    # 运行 doctor 获取配置状态
-                    echo -e "${YELLOW}配置检查:${NC}"
-                    openclaw doctor 2>&1 | head -15 | sed 's/^/  /'
-                    
-                    echo ""
-                    echo -e "${CYAN}建议:${NC}"
-                    echo -e "  1. 运行 ${WHITE}openclaw doctor --fix${NC} 修复配置"
-                    echo -e "  2. 运行 ${WHITE}openclaw gateway${NC} 手动启动查看详细错误"
                 fi
             else
                 log_error "OpenClaw 未安装"
@@ -5812,73 +5723,8 @@ manage_service() {
             ;;
         3)
             echo ""
-            log_info "正在重启服务..."
             if check_openclaw_installed; then
-                # 确保配置正确
-                ensure_openclaw_init
-                
-                # 加载环境变量
-                if [ -f "$OPENCLAW_ENV" ]; then
-                    source "$OPENCLAW_ENV"
-                fi
-                
-                # 使用官方 restart 命令
-                local restart_output
-                restart_output=$(openclaw gateway restart 2>&1) || true
-                local restart_exit=$?
-                
-                sleep 2
-                
-                # 使用端口检测判断服务是否启动成功（更可靠）
-                local gateway_pid
-                gateway_pid=$(get_gateway_pid)
-                
-                if [ -n "$gateway_pid" ]; then
-                    log_info "服务已重启 (PID: $gateway_pid)"
-                    echo ""
-                    
-                    # 获取并显示 Dashboard URL
-                    local dashboard_url=$(openclaw dashboard --no-open 2>/dev/null | grep -E "^https?://" | head -1)
-                    if [ -n "$dashboard_url" ]; then
-                        echo -e "${GREEN}✓ Dashboard URL:${NC}"
-                        echo -e "  ${WHITE}$dashboard_url${NC}"
-                    else
-                        echo -e "${YELLOW}提示: openclaw dashboard 获取访问 URL${NC}"
-                    fi
-                else
-                    log_error "重启失败"
-                    echo ""
-                    echo -e "${YELLOW}命令输出:${NC}"
-                    echo "$restart_output" | head -10 | sed 's/^/  /'
-                    echo ""
-                    
-                    # 尝试多个日志来源
-                    echo -e "${YELLOW}诊断信息:${NC}"
-                    echo ""
-                    
-                    # 1. 临时日志
-                    if [ -s /tmp/openclaw-gateway.log ]; then
-                        echo -e "${CYAN}启动日志:${NC}"
-                        tail -10 /tmp/openclaw-gateway.log 2>/dev/null | sed 's/^/  /'
-                        echo ""
-                    fi
-                    
-                    # 2. OpenClaw 系统日志
-                    echo -e "${CYAN}系统日志 (最近 5 条):${NC}"
-                    openclaw logs 2>/dev/null | tail -5 | sed 's/^/  /' || echo "  (无法获取)"
-                    echo ""
-                    
-                    # 3. 检查 doctor 状态
-                    echo -e "${CYAN}配置状态:${NC}"
-                    openclaw doctor 2>&1 | grep -E "error|warning|✗|⚠" | head -5 | sed 's/^/  /' || echo "  (正常)"
-                    echo ""
-                    
-                    # 4. 建议
-                    echo -e "${CYAN}建议:${NC}"
-                    echo "  • 运行 ${WHITE}openclaw doctor --fix${NC} 修复配置问题"
-                    echo "  • 运行 ${WHITE}openclaw gateway start${NC} 手动启动"
-                    echo "  • 查看完整日志: ${WHITE}openclaw logs${NC}"
-                fi
+                restart_gateway_for_channel
             else
                 log_error "OpenClaw 未安装"
             fi
@@ -5912,14 +5758,18 @@ manage_service() {
         7)
             echo ""
             if check_openclaw_installed; then
-                log_info "正在安装系统服务..."
-                openclaw gateway install
-                log_info "系统服务已安装"
-                echo ""
-                echo -e "${CYAN}现在可以使用以下命令管理服务:${NC}"
-                echo "  openclaw gateway start"
-                echo "  openclaw gateway stop"
-                echo "  openclaw gateway restart"
+                local svc_host svc_port
+                svc_host="$(get_gateway_host)"
+                svc_port="$(get_gateway_port)"
+                log_info "正在执行官方服务收敛安装..."
+                if converge_gateway_single_instance_menu "$svc_port" "$svc_host"; then
+                    log_info "系统服务已安装并生效"
+                    echo ""
+                    echo -e "${CYAN}现在可以使用以下命令管理服务:${NC}"
+                    echo "  openclaw gateway start"
+                    echo "  openclaw gateway stop"
+                    echo "  openclaw gateway restart"
+                fi
             else
                 log_error "OpenClaw 未安装"
             fi

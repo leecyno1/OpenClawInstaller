@@ -2671,76 +2671,115 @@ setup_identity() {
 
 # ================================ 服务管理 ================================
 
-setup_daemon() {
-    if confirm "是否设置开机自启动？" "y"; then
-        log_step "配置系统服务..."
-        
-        case "$OS" in
-            macos)
-                setup_launchd
-                ;;
-            *)
-                setup_systemd
-                ;;
-        esac
+cleanup_legacy_gateway_runtime() {
+    # 历史版本可能创建了 /etc/systemd/system/openclaw.service，需先停用避免双实例
+    if check_command systemctl; then
+        if [ -f /etc/systemd/system/openclaw.service ] || systemctl list-unit-files 2>/dev/null | grep -q '^openclaw\.service'; then
+            log_warn "检测到遗留 openclaw.service，正在停用以避免 Gateway 端口冲突..."
+            run_as_root systemctl disable --now openclaw.service >/dev/null 2>&1 || true
+            run_as_root systemctl daemon-reload >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if check_command openclaw; then
+        openclaw gateway stop >/dev/null 2>&1 || true
+    fi
+
+    if check_command pkill; then
+        pkill -f "openclaw-gateway" >/dev/null 2>&1 || true
+        pkill -f "openclaw gateway" >/dev/null 2>&1 || true
     fi
 }
 
-setup_systemd() {
-    cat > /tmp/openclaw.service << EOF
-[Unit]
-Description=OpenClaw AI Assistant
-After=network.target
+install_official_gateway_service() {
+    local log_file
+    log_file="$(mktemp /tmp/openclaw-gateway-install.XXXXXX.log)"
 
-[Service]
-Type=simple
-User=$USER
-ExecStart=$(which openclaw) gateway start
-Restart=on-failure
-RestartSec=10
+    if openclaw gateway install --force --port "$GATEWAY_PORT" >"$log_file" 2>&1; then
+        log_info "官方 Gateway 服务已安装（--force --port ${GATEWAY_PORT}）"
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
 
-[Install]
-WantedBy=multi-user.target
-EOF
+    if openclaw gateway install --force >"$log_file" 2>&1; then
+        log_warn "当前版本不支持 --port，已按配置端口安装官方 Gateway 服务"
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
 
-    sudo mv /tmp/openclaw.service /etc/systemd/system/
-    sudo systemctl daemon-reload
-    sudo systemctl enable openclaw
-    
-    log_info "Systemd 服务已配置"
+    if openclaw gateway install >"$log_file" 2>&1; then
+        log_warn "当前版本不支持 --force，已安装官方 Gateway 服务"
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+
+    log_error "官方 Gateway 服务安装失败"
+    tail -20 "$log_file" 2>/dev/null | sed 's/^/  /'
+    rm -f "$log_file" 2>/dev/null || true
+    return 1
 }
 
-setup_launchd() {
-    mkdir -p "$HOME/Library/LaunchAgents"
-    
-    cat > "$HOME/Library/LaunchAgents/com.openclaw.agent.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.openclaw.agent</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$(which openclaw)</string>
-        <string>gateway</string>
-        <string>start</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>$CONFIG_DIR/stdout.log</string>
-    <key>StandardErrorPath</key>
-    <string>$CONFIG_DIR/stderr.log</string>
-</dict>
-</plist>
-EOF
+converge_gateway_single_instance() {
+    local mode="${1:-restart}" # install-only | restart
+    local restart_output=""
 
-    launchctl load "$HOME/Library/LaunchAgents/com.openclaw.agent.plist" 2>/dev/null || true
-    
-    log_info "LaunchAgent 已配置"
+    if ! check_command openclaw; then
+        log_error "未检测到 openclaw 命令，无法收敛 Gateway 服务"
+        return 1
+    fi
+
+    log_step "收敛 Gateway 为单实例（${GATEWAY_HOST}:${GATEWAY_PORT}）..."
+    cleanup_legacy_gateway_runtime
+
+    openclaw config set gateway.mode local >/dev/null 2>&1 || true
+    openclaw config set gateway.host "$GATEWAY_HOST" >/dev/null 2>&1 || true
+    openclaw config set gateway.port "$GATEWAY_PORT" >/dev/null 2>&1 || true
+    openclaw config set gateway.bind "$GATEWAY_HOST:$GATEWAY_PORT" >/dev/null 2>&1 || true
+    init_openclaw_config
+
+    if ! install_official_gateway_service; then
+        return 1
+    fi
+
+    if [ "$mode" = "install-only" ]; then
+        log_info "Gateway 单实例服务收敛完成（未启动）"
+        return 0
+    fi
+
+    restart_output="$(openclaw gateway restart 2>&1)" || true
+    sleep 2
+
+    local gateway_pid
+    gateway_pid="$(get_gateway_pid)"
+    if [ -z "$gateway_pid" ]; then
+        restart_output="$(openclaw gateway start 2>&1)" || true
+        sleep 2
+        gateway_pid="$(get_gateway_pid)"
+    fi
+
+    if [ -n "$gateway_pid" ]; then
+        log_info "Gateway 已单实例运行 (PID: $gateway_pid, 端口: $GATEWAY_PORT)"
+        openclaw gateway status 2>/dev/null | head -8 | sed 's/^/  /' || true
+        return 0
+    fi
+
+    log_error "Gateway 启动失败，未检测到端口监听: $GATEWAY_PORT"
+    echo "$restart_output" | head -15 | sed 's/^/  /'
+    if check_command ss; then
+        ss -lntp 2>/dev/null | grep -E "(:${GATEWAY_PORT}\\b|openclaw)" | head -10 | sed 's/^/  /' || true
+    fi
+    return 1
+}
+
+setup_daemon() {
+    if confirm "是否设置开机自启动？" "y"; then
+        if ! converge_gateway_single_instance "install-only"; then
+            return 1
+        fi
+        log_info "已切换为官方 Gateway 服务管理（避免多实例冲突）"
+    else
+        log_info "跳过开机自启动配置"
+    fi
 }
 
 # ================================ 完成安装 ================================
@@ -2779,13 +2818,6 @@ start_openclaw_service() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
-    # 加载环境变量
-    local env_file="$HOME/.openclaw/env"
-    if [ -f "$env_file" ]; then
-        source "$env_file"
-        log_info "已加载环境变量"
-    fi
-    
     # 使用端口检测判断是否已有服务在运行（更可靠）
     local existing_pid
     existing_pid=$(get_gateway_pid)
@@ -2799,29 +2831,12 @@ start_openclaw_service() {
             return 0
         fi
     fi
-    
-    # 后台启动 Gateway（使用 setsid 完全脱离终端）
-    log_step "正在后台启动 Gateway..."
-    
-    if command -v setsid &> /dev/null; then
-        if [ -f "$env_file" ]; then
-            setsid bash -c "source $env_file && exec openclaw gateway --port ${GATEWAY_PORT}" > /tmp/openclaw-gateway.log 2>&1 &
-        else
-            setsid openclaw gateway --port "${GATEWAY_PORT}" > /tmp/openclaw-gateway.log 2>&1 &
-        fi
-    else
-        # 备用方案：nohup + disown
-        if [ -f "$env_file" ]; then
-            nohup bash -c "source $env_file && exec openclaw gateway --port ${GATEWAY_PORT}" > /tmp/openclaw-gateway.log 2>&1 &
-        else
-            nohup openclaw gateway --port "${GATEWAY_PORT}" > /tmp/openclaw-gateway.log 2>&1 &
-        fi
-        disown 2>/dev/null || true
+
+    if ! converge_gateway_single_instance "restart"; then
+        log_error "Gateway 启动失败，请先执行: openclaw doctor --fix"
+        return 1
     fi
-    
-    # 等待服务启动
-    sleep 3
-    
+
     # 使用端口检测判断服务是否启动成功（更可靠）
     local gateway_pid
     gateway_pid=$(get_gateway_pid)
@@ -2838,9 +2853,7 @@ start_openclaw_service() {
         log_info "OpenClaw 现在可以接收消息了！"
     else
         log_error "Gateway 启动失败"
-        echo ""
-        echo -e "${YELLOW}请查看日志: tail -f /tmp/openclaw-gateway.log${NC}"
-        echo -e "${YELLOW}或手动启动: source ~/.openclaw/env && openclaw gateway --port ${GATEWAY_PORT}${NC}"
+        echo -e "${YELLOW}排查命令:${NC} openclaw gateway status && openclaw doctor --fix"
     fi
 }
 
@@ -2974,7 +2987,7 @@ main() {
     else
         echo ""
         echo -e "${CYAN}稍后可以通过以下命令启动服务:${NC}"
-        echo "  source ~/.openclaw/env && openclaw gateway --port ${GATEWAY_PORT}"
+        echo "  openclaw gateway restart"
         echo ""
     fi
     
