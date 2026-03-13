@@ -224,7 +224,7 @@ bash ./config-menu.sh
 - `[2]` AI 模型配置（官方 `openclaw onboard`）
 - `[3]` 官方消息渠道插件（官方流程）
 - `[4]` 非官方消息渠道配置（社区插件：微信/QQ/企业微信/钉钉等）
-- `[6]` Skills 管理（查看/添加/删除/同步默认技能包）
+- `[6]` Skills 管理（官方插件管理 / 增强插件管理 / 超级插件管理 / 默认技能包同步）
 - `[7]` 快速测试
 - `[8]` 高级设置（升级、备份、恢复）
 - `[8]` 高级设置 → `[8]` AI 自动修复 OpenClaw（集成 `auto-fix-openclaw`，支持 Codex/Claude CLI）
@@ -312,6 +312,11 @@ export OPENCLAW_SKILLS_FORCE_UPDATE=1
 - docx
 - pptx
 - xlsx
+- frontend-design
+- web-design
+- stock-monitor-skill（Stock Monitor）
+- multi-search-engine（Multi Search Engine）
+- akshare-stock（AkShare Stock）
 
 ## 渠道配置文档
 

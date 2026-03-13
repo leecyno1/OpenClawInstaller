@@ -33,3 +33,8 @@ Bundled skills:
 - docx
 - pptx
 - xlsx
+- frontend-design
+- web-design
+- stock-monitor-skill
+- multi-search-engine
+- akshare-stock
