@@ -123,11 +123,16 @@ WECOM_WEBHOOK_APP_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_APP_PATH:-/wecom/app}"
 DINGTALK_PLUGIN_COMMUNITY="openclaw-channel-dingtalk"
 DINGTALK_PLUGIN_VERSION_DEFAULT="${OPENCLAW_DINGTALK_PLUGIN_VERSION:-2.2.2}"
 INSTALLER_REPO="leecyno1/auto-install-Openclaw"
+INSTALLER_REPO_GITEE="leecyno1/auto-install-openclaw"
 INSTALLER_RAW_URL="https://raw.githubusercontent.com/${INSTALLER_REPO}/main"
+INSTALLER_GITEE_RAW_URL="https://gitee.com/${INSTALLER_REPO_GITEE}/raw/main"
 AUTO_FIX_OPENCLAW_REPO_URL="${AUTO_FIX_OPENCLAW_REPO_URL:-https://github.com/leecyno1/auto-fix-openclaw.git}"
 AUTO_FIX_OPENCLAW_REPO_MIRROR_URL="${AUTO_FIX_OPENCLAW_REPO_MIRROR_URL:-https://mirror.ghproxy.com/https://github.com/leecyno1/auto-fix-openclaw.git}"
 AUTO_FIX_OPENCLAW_DIR="${AUTO_FIX_OPENCLAW_DIR:-$HOME/.openclaw/tools/auto-fix-openclaw}"
 AUTO_FIX_OPENCLAW_BIN="$AUTO_FIX_OPENCLAW_DIR/bin/auto-fix-openclaw"
+
+DEFAULT_OFFICIAL_PLUGINS="blogwatcher github gog gifgrep nano-banana-pro nano-pdf obsidian gemini summarize video-frames"
+ENHANCED_SKILLS_LIST="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx frontend-design web-design"
 
 # ================================ 工具函数 ================================
 
@@ -5336,17 +5341,78 @@ get_config_menu_script_dir() {
     cd "$(dirname "${BASH_SOURCE[0]}")" && pwd
 }
 
+get_installer_repo_urls() {
+    cat <<EOF
+https://gitee.com/${INSTALLER_REPO_GITEE}.git
+https://github.com/${INSTALLER_REPO}.git
+https://mirror.ghproxy.com/https://github.com/${INSTALLER_REPO}.git
+EOF
+}
+
+resolve_default_skills_bundle_dir() {
+    local script_dir
+    local bundle_dir
+    local cache_root
+    local cache_repo
+    local cache_bundle
+    local tmp_repo
+    local url
+
+    script_dir="$(get_config_menu_script_dir)"
+    bundle_dir="$script_dir/skills/default"
+    if [ -d "$bundle_dir" ]; then
+        echo "$bundle_dir"
+        return 0
+    fi
+
+    cache_root="$CONFIG_DIR/.cache"
+    cache_repo="$cache_root/auto-install-openclaw-repo"
+    cache_bundle="$cache_repo/skills/default"
+    mkdir -p "$cache_root" 2>/dev/null || true
+
+    if [ -d "$cache_bundle" ]; then
+        echo "$cache_bundle"
+        return 0
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        log_error "未检测到 git，且本地缺少 skills/default，无法拉取默认技能包"
+        return 1
+    fi
+
+    log_warn "本地未发现 skills/default，正在从仓库拉取默认技能包..."
+    tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+    for url in $(get_installer_repo_urls); do
+        rm -rf "$tmp_repo" 2>/dev/null || true
+        tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+        if git clone --depth 1 "$url" "$tmp_repo" >/dev/null 2>&1 && [ -d "$tmp_repo/skills/default" ]; then
+            rm -rf "$cache_repo" 2>/dev/null || true
+            mv "$tmp_repo" "$cache_repo"
+            echo "$cache_repo/skills/default"
+            return 0
+        fi
+    done
+
+    rm -rf "$tmp_repo" 2>/dev/null || true
+    log_error "无法从 GitHub/Gitee 拉取默认技能包"
+    return 1
+}
+
+copy_skill_dir() {
+    local src="$1"
+    local dst="$2"
+    rm -rf "$dst" 2>/dev/null || true
+    cp -a "$src" "$dst"
+}
+
 sync_default_skills_bundle() {
     local force_update="${1:-0}"
-    local script_dir
-    script_dir="$(get_config_menu_script_dir)"
-    local bundle_dir="$script_dir/skills/default"
+    local bundle_dir
     local target_dir="$CONFIG_DIR/skills"
     local copied=0
     local skipped=0
 
-    if [ ! -d "$bundle_dir" ]; then
-        log_error "未找到默认技能包目录: $bundle_dir"
+    if ! bundle_dir="$(resolve_default_skills_bundle_dir)"; then
         return 1
     fi
 
@@ -5365,14 +5431,64 @@ sync_default_skills_bundle() {
             continue
         fi
 
-        rm -rf "$dst" 2>/dev/null || true
-        if cp -a "$src" "$dst" 2>/dev/null; then
+        if copy_skill_dir "$src" "$dst" 2>/dev/null; then
             copied=$((copied + 1))
         fi
     done
 
     log_info "默认技能包同步完成：新增/更新 ${copied}，保留 ${skipped}"
     return 0
+}
+
+sync_named_skills_from_bundle() {
+    local skill_names="$1"
+    local force_update="${2:-0}"
+    local bundle_dir
+    local target_dir="$CONFIG_DIR/skills"
+    local copied=0
+    local skipped=0
+    local missing=0
+    local name src dst
+
+    if ! bundle_dir="$(resolve_default_skills_bundle_dir)"; then
+        return 1
+    fi
+
+    mkdir -p "$target_dir" 2>/dev/null || true
+    for name in $skill_names; do
+        src="$bundle_dir/$name"
+        dst="$target_dir/$name"
+
+        if [ ! -d "$src" ]; then
+            missing=$((missing + 1))
+            log_warn "技能包缺失: $name"
+            continue
+        fi
+
+        if [ -d "$dst" ] && [ "$force_update" != "1" ]; then
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        if copy_skill_dir "$src" "$dst" 2>/dev/null; then
+            copied=$((copied + 1))
+        fi
+    done
+
+    log_info "增强技能同步完成：新增/更新 ${copied}，保留 ${skipped}，缺失 ${missing}"
+}
+
+list_enhanced_skills_status() {
+    local bundle_dir=""
+    local name
+    bundle_dir="$(resolve_default_skills_bundle_dir 2>/dev/null || true)"
+    for name in $ENHANCED_SKILLS_LIST; do
+        local tag_bundle="${RED}缺失${NC}"
+        local tag_installed="${RED}未安装${NC}"
+        [ -n "$bundle_dir" ] && [ -d "$bundle_dir/$name" ] && tag_bundle="${GREEN}可安装${NC}"
+        [ -d "$CONFIG_DIR/skills/$name" ] && tag_installed="${GREEN}已安装${NC}"
+        echo -e "  - ${WHITE}${name}${NC} | 包源: ${tag_bundle} | 本机: ${tag_installed}"
+    done
 }
 
 list_installed_skills() {
@@ -5444,6 +5560,193 @@ remove_installed_skill() {
     log_info "技能已删除: $skill_name"
 }
 
+open_official_skills_settings() {
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        return 1
+    fi
+
+    echo ""
+    log_info "跳转官方 Skills/Plugins 设置..."
+    if openclaw skills --help >/dev/null 2>&1; then
+        if [ -e /dev/tty ] && ( : < /dev/tty ) 2>/dev/null; then
+            openclaw skills < /dev/tty
+        else
+            openclaw skills
+        fi
+        return 0
+    fi
+
+    log_warn "当前版本无 openclaw skills 命令，改为启动官方向导 openclaw onboard"
+    if [ -e /dev/tty ] && ( : < /dev/tty ) 2>/dev/null; then
+        openclaw onboard < /dev/tty
+    else
+        openclaw onboard
+    fi
+}
+
+install_default_official_plugins_menu() {
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        return 1
+    fi
+
+    local plugin ok=0 fail=0
+    for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
+        if openclaw plugins install "$plugin" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin" >/dev/null 2>&1; then
+            openclaw plugins enable "$plugin" >/dev/null 2>&1 || true
+            log_info "已安装官方插件: $plugin"
+            ok=$((ok + 1))
+        else
+            log_warn "安装失败: $plugin"
+            fail=$((fail + 1))
+        fi
+    done
+    log_info "官方插件安装完成：成功 ${ok}，失败 ${fail}"
+}
+
+manage_official_plugins() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🧭 官方插件管理${NC}"
+    print_divider
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        press_enter
+        return
+    fi
+
+    print_menu_item "1" "查看官方插件列表" "📋"
+    print_menu_item "2" "安装默认官方插件集" "📦"
+    print_menu_item "3" "更新全部插件" "⬆️"
+    print_menu_item "4" "跳转官方 Skills 设置" "🚀"
+    print_menu_item "0" "返回上级菜单" "↩️"
+    echo ""
+    read_input "${YELLOW}请选择 [0-4]: ${NC}" official_choice
+
+    case "$official_choice" in
+        1) openclaw plugins list 2>/dev/null | head -80 || log_warn "无法读取插件列表" ;;
+        2) install_default_official_plugins_menu ;;
+        3) openclaw plugins update --all ;;
+        4) open_official_skills_settings ;;
+        0) return ;;
+        *) log_error "无效选择" ;;
+    esac
+
+    press_enter
+    manage_official_plugins
+}
+
+install_super_skill_from_repo() {
+    local repo_url="$1"
+    local hint_name="$2"
+    local tmp_dir
+    local target_dir="$CONFIG_DIR/skills"
+    local copied=0
+
+    mkdir -p "$target_dir" "$CONFIG_DIR/.cache" 2>/dev/null || true
+    if ! command -v git >/dev/null 2>&1; then
+        log_error "未检测到 git，无法拉取仓库: $repo_url"
+        return 1
+    fi
+
+    tmp_dir="$(mktemp -d "$CONFIG_DIR/.cache/super-skill.XXXXXX")"
+    if ! git clone --depth 1 "$repo_url" "$tmp_dir" >/dev/null 2>&1; then
+        rm -rf "$tmp_dir" 2>/dev/null || true
+        log_error "拉取失败: $repo_url"
+        return 1
+    fi
+
+    if [ -f "$tmp_dir/SKILL.md" ]; then
+        copy_skill_dir "$tmp_dir" "$target_dir/$hint_name" 2>/dev/null || true
+        copied=1
+    else
+        local d
+        while IFS= read -r d; do
+            [ -d "$d" ] || continue
+            local name
+            name="$(basename "$d")"
+            copy_skill_dir "$d" "$target_dir/$name" 2>/dev/null || true
+            copied=$((copied + 1))
+        done < <(find "$tmp_dir" -mindepth 2 -maxdepth 3 -type f -name SKILL.md -exec dirname {} \; | sort -u)
+    fi
+
+    rm -rf "$tmp_dir" 2>/dev/null || true
+    if [ "$copied" -gt 0 ]; then
+        log_info "已导入超级插件技能 ${copied} 个"
+    else
+        log_warn "仓库中未发现可导入的 SKILL.md"
+    fi
+}
+
+install_super_skill_from_local() {
+    local src="$1"
+    local skill_name="$2"
+    local target_dir="$CONFIG_DIR/skills"
+
+    if [ ! -f "$src/SKILL.md" ]; then
+        log_warn "本机不存在该技能: $src"
+        return 1
+    fi
+    mkdir -p "$target_dir" 2>/dev/null || true
+    copy_skill_dir "$src" "$target_dir/$skill_name"
+    log_info "已导入本地技能: $skill_name"
+}
+
+manage_super_skills() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🚀 超级插件管理${NC}"
+    print_divider
+    echo ""
+    print_menu_item "1" "安装 Baoyu 系列技能（GitHub）" "📚"
+    print_menu_item "2" "安装 wechat-skills（GitHub）" "📝"
+    print_menu_item "3" "导入 ai-meeting-notes（本机）" "🗒️"
+    print_menu_item "4" "导入 tmux（本机）" "🧰"
+    print_menu_item "0" "返回上级菜单" "↩️"
+    echo ""
+    read_input "${YELLOW}请选择 [0-4]: ${NC}" super_choice
+
+    case "$super_choice" in
+        1) install_super_skill_from_repo "https://github.com/JimLiu/baoyu-skills.git" "baoyu-skills" ;;
+        2) install_super_skill_from_repo "https://github.com/gainubi/wechat-skills.git" "wechat-skills" ;;
+        3) install_super_skill_from_local "/Users/lichengyin/.codex/skills/ai-meeting-notes" "ai-meeting-notes" ;;
+        4) install_super_skill_from_local "/Users/lichengyin/.codex/skills/tmux" "tmux" ;;
+        0) return ;;
+        *) log_error "无效选择" ;;
+    esac
+
+    press_enter
+    manage_super_skills
+}
+
+manage_enhanced_skills() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🧠 增强插件管理${NC}"
+    print_divider
+    echo ""
+    print_menu_item "1" "查看增强插件状态" "📊"
+    print_menu_item "2" "安装增强插件（仅缺失）" "📦"
+    print_menu_item "3" "强制更新增强插件（覆盖同名）" "🔄"
+    print_menu_item "0" "返回上级菜单" "↩️"
+    echo ""
+    read_input "${YELLOW}请选择 [0-3]: ${NC}" enhanced_choice
+
+    case "$enhanced_choice" in
+        1) list_enhanced_skills_status ;;
+        2) sync_named_skills_from_bundle "$ENHANCED_SKILLS_LIST" 0 ;;
+        3) sync_named_skills_from_bundle "$ENHANCED_SKILLS_LIST" 1 ;;
+        0) return ;;
+        *) log_error "无效选择" ;;
+    esac
+
+    press_enter
+    manage_enhanced_skills
+}
+
 manage_skills() {
     clear_screen
     print_header
@@ -5454,11 +5757,14 @@ manage_skills() {
     print_menu_item "1" "查看已安装 Skills" "📋"
     print_menu_item "2" "安装默认技能包（仅补齐缺失）" "📦"
     print_menu_item "3" "强制更新默认技能包（覆盖同名）" "🔄"
-    print_menu_item "4" "从本地目录添加 Skill" "➕"
-    print_menu_item "5" "删除已安装 Skill" "🗑️"
+    print_menu_item "4" "官方插件管理（跳转官方设置）" "🧭"
+    print_menu_item "5" "增强插件管理" "🧠"
+    print_menu_item "6" "超级插件管理" "🚀"
+    print_menu_item "7" "从本地目录添加 Skill" "➕"
+    print_menu_item "8" "删除已安装 Skill" "🗑️"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
-    read_input "${YELLOW}请选择 [0-5]: ${NC}" skills_choice
+    read_input "${YELLOW}请选择 [0-8]: ${NC}" skills_choice
 
     case "$skills_choice" in
         1)
@@ -5473,9 +5779,18 @@ manage_skills() {
             sync_default_skills_bundle 1
             ;;
         4)
-            add_skill_from_local_path
+            manage_official_plugins
             ;;
         5)
+            manage_enhanced_skills
+            ;;
+        6)
+            manage_super_skills
+            ;;
+        7)
+            add_skill_from_local_path
+            ;;
+        8)
             remove_installed_skill
             ;;
         0)
@@ -7425,7 +7740,7 @@ show_main_menu() {
     print_menu_item "3" "官方消息渠道插件（官方）" "📡"
     print_menu_item "4" "非官方消息渠道配置（社区）" "📱"
     print_menu_item "5" "安全设置" "🔒"
-    print_menu_item "6" "Skills 管理" "🧩"
+    print_menu_item "6" "Skills 管理（官方/增强/超级）" "🧩"
     print_menu_item "7" "快速测试" "🧪"
     print_menu_item "8" "高级设置" "🔧"
     print_menu_item "9" "查看当前配置" "📋"

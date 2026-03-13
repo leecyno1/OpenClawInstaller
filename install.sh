@@ -75,7 +75,9 @@ MIN_NODE_MINOR=12
 INSTALLER_NAME="auto-install-Openclaw"
 INSTALLER_VERSION="1.0.5"
 GITHUB_REPO="${GITHUB_REPO:-leecyno1/auto-install-Openclaw}"
+GITEE_REPO="${GITEE_REPO:-leecyno1/auto-install-openclaw}"
 GITHUB_RAW_URL="https://raw.githubusercontent.com/$GITHUB_REPO/main"
+GITEE_RAW_URL="https://gitee.com/$GITEE_REPO/raw/main"
 OFFICIAL_INSTALL_URL="https://openclaw.ai/install.sh"
 OFFICIAL_DOCS_URL="https://docs.openclaw.ai"
 INSTALLER_MIRROR_RAW_URL="${OPENCLAW_INSTALLER_MIRROR_RAW_URL:-https://mirror.ghproxy.com/${GITHUB_RAW_URL}}"
@@ -90,6 +92,7 @@ SWAP_THRESHOLD_MB="${OPENCLAW_SWAP_THRESHOLD_MB:-4096}"
 SWAP_TARGET_MB="${OPENCLAW_SWAP_TARGET_MB:-0}"
 SWAP_FILE_BASE="${OPENCLAW_SWAP_FILE:-/swapfile.openclaw}"
 AUTO_FIX_ATTEMPTED=0
+DEFAULT_OFFICIAL_PLUGINS="blogwatcher github gog gifgrep nano-banana-pro nano-pdf obsidian gemini summarize video-frames"
 
 NO_ONBOARD="${OPENCLAW_NO_ONBOARD:-0}"
 NO_PROMPT="${OPENCLAW_NO_PROMPT:-0}"
@@ -1211,6 +1214,82 @@ apply_default_security_baseline() {
     log_info "默认基础权限已启用：system commands / file access / web browsing"
 }
 
+get_installer_repo_urls() {
+    cat <<EOF
+https://gitee.com/${GITEE_REPO}.git
+https://github.com/${GITHUB_REPO}.git
+https://mirror.ghproxy.com/https://github.com/${GITHUB_REPO}.git
+EOF
+}
+
+resolve_install_skills_bundle_dir() {
+    local script_dir
+    local local_bundle
+    local cache_root
+    local cache_repo
+    local cache_bundle
+    local tmp_repo
+    local url
+
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local_bundle="$script_dir/skills/default"
+    if [ -d "$local_bundle" ]; then
+        echo "$local_bundle"
+        return 0
+    fi
+
+    cache_root="$CONFIG_DIR/.cache"
+    cache_repo="$cache_root/auto-install-openclaw-repo"
+    cache_bundle="$cache_repo/skills/default"
+    mkdir -p "$cache_root" 2>/dev/null || true
+
+    if [ -d "$cache_bundle" ]; then
+        echo "$cache_bundle"
+        return 0
+    fi
+
+    if ! check_command git; then
+        return 1
+    fi
+
+    log_warn "当前安装脚本不在仓库目录内，正在从远端拉取默认技能包..."
+    tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+    for url in $(get_installer_repo_urls); do
+        rm -rf "$tmp_repo" 2>/dev/null || true
+        tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+        if git clone --depth 1 "$url" "$tmp_repo" >/dev/null 2>&1 && [ -d "$tmp_repo/skills/default" ]; then
+            rm -rf "$cache_repo" 2>/dev/null || true
+            mv "$tmp_repo" "$cache_repo"
+            echo "$cache_repo/skills/default"
+            return 0
+        fi
+    done
+    rm -rf "$tmp_repo" 2>/dev/null || true
+    return 1
+}
+
+install_default_official_plugins() {
+    if ! check_command openclaw; then
+        log_warn "未检测到 openclaw，跳过默认官方插件安装。"
+        return 0
+    fi
+
+    log_step "安装默认官方插件集（blogwatcher/github/gog/gifgrep/nano-banana-pro/...）..."
+    local ok=0
+    local fail=0
+    local plugin
+    for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
+        if openclaw plugins install "$plugin" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin" >/dev/null 2>&1; then
+            openclaw plugins enable "$plugin" >/dev/null 2>&1 || true
+            ok=$((ok + 1))
+        else
+            log_warn "官方插件安装失败（可后续手动安装）: $plugin"
+            fail=$((fail + 1))
+        fi
+    done
+    log_info "默认官方插件安装完成：成功 ${ok}，失败 ${fail}"
+}
+
 install_channel_assets() {
     local skill_dir="$CONFIG_DIR/skills/channel-setup-assistant"
     local skill_file="$skill_dir/SKILL.md"
@@ -1221,7 +1300,7 @@ install_channel_assets() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local local_doc="$script_dir/docs/channels-configuration-guide.md"
     local local_skill="$script_dir/skills/channel-setup-assistant/SKILL.md"
-    local bundled_skills_dir="$script_dir/skills/default"
+    local bundled_skills_dir=""
     local skills_force_update="${OPENCLAW_SKILLS_FORCE_UPDATE:-0}"
     local copied_count=0
     local kept_count=0
@@ -1285,7 +1364,8 @@ EOF
     fi
 
     # 默认技能包注入（可通过 OPENCLAW_SKILLS_FORCE_UPDATE=1 强制覆盖）
-    if [ -d "$bundled_skills_dir" ]; then
+    bundled_skills_dir="$(resolve_install_skills_bundle_dir || true)"
+    if [ -n "$bundled_skills_dir" ] && [ -d "$bundled_skills_dir" ]; then
         local bundled_src
         for bundled_src in "$bundled_skills_dir"/*; do
             [ -d "$bundled_src" ] || continue
@@ -1306,7 +1386,7 @@ EOF
         done
         log_info "默认技能包已处理: 新增/更新 ${copied_count} 个，保留 ${kept_count} 个（已存在）"
     else
-        log_warn "未找到默认技能包目录: $bundled_skills_dir"
+        log_warn "未找到默认技能包目录，已跳过（后续可在配置菜单中重新同步）"
     fi
 
     chmod 644 "$skill_file" "$doc_file" 2>/dev/null || true
@@ -2967,6 +3047,7 @@ main() {
         log_error "OpenClaw 安装失败"
         exit 1
     fi
+    install_default_official_plugins
     if [ "$NO_ONBOARD" = "1" ]; then
         log_info "已按参数跳过 AI 初始化向导 (--no-onboard)"
     else
