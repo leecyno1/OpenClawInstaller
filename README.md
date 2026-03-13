@@ -7,11 +7,15 @@
 > ```
 > **配置命令（安装后立即执行）**
 > ```bash
-> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
+> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash
 > ```
 > **多源容灾安装（备用）**
 > ```bash
 > bash -c 'set -e; tmp="$(mktemp)"; for u in "https://gitee.com/leecyno1/auto-install-openclaw/raw/main/install.sh" "https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/install.sh" "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/install.sh" "https://cdn.jsdelivr.net/gh/leecyno1/auto-install-Openclaw@main/install.sh"; do echo "Try: $u"; if curl -fsSL --proto "=https" --tlsv1.2 --connect-timeout 8 --max-time 25 "$u" -o "$tmp"; then bash "$tmp"; rm -f "$tmp"; exit 0; fi; done; rm -f "$tmp"; echo "All sources failed. 请稍后重试或更换网络。"; exit 1'
+> ```
+> **多源容灾配置（备用）**
+> ```bash
+> bash -c 'set -e; tmp="$(mktemp)"; for u in "https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh" "https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://cdn.jsdelivr.net/gh/leecyno1/auto-install-Openclaw@main/config-menu.sh"; do echo "Try: $u"; if curl -fsSL --proto "=https" --tlsv1.2 --connect-timeout 8 --max-time 25 "$u" -o "$tmp"; then bash "$tmp"; rm -f "$tmp"; exit 0; fi; done; rm -f "$tmp"; echo "All sources failed. 请稍后重试或更换网络。"; exit 1'
 > ```
 
 <p align="center">
@@ -143,7 +147,13 @@ curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://
 ### 配置命令（建议紧接安装执行）
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
+curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash
+```
+
+### 配置命令（多源容灾备用）
+
+```bash
+bash -c 'set -e; tmp="$(mktemp)"; for u in "https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh" "https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://cdn.jsdelivr.net/gh/leecyno1/auto-install-Openclaw@main/config-menu.sh"; do echo "Try: $u"; if curl -fsSL --proto "=https" --tlsv1.2 --connect-timeout 8 --max-time 25 "$u" -o "$tmp"; then bash "$tmp"; rm -f "$tmp"; exit 0; fi; done; rm -f "$tmp"; echo "All sources failed. 请稍后重试或更换网络。"; exit 1'
 ```
 
 如需自定义镜像源（自建 CDN/Gitee Raw），可在执行前设置：

@@ -118,6 +118,7 @@ bash ./config-menu.sh
 
 # 或者多源下载运行（内置超时与自动回退）
 bash -c 'set -e; tmp="$(mktemp)"; for u in \
+"https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh" \
 "https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" \
 "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" \
 "https://cdn.jsdelivr.net/gh/leecyno1/auto-install-Openclaw@main/config-menu.sh"; do \
