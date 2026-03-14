@@ -114,9 +114,11 @@ QQ_PLUGIN_VERSION_DEFAULT="${OPENCLAW_QQ_PLUGIN_VERSION:-1.5.4}"
 WECHAT_PLUGIN_LANGBOT="openclaw-wechat-channel"
 WECHAT_PLUGIN_VERSION_DEFAULT="${OPENCLAW_WECHAT_PLUGIN_VERSION:-0.5.0}"
 WECHATPAD_CALLBACK_PATH_DEFAULT="${OPENCLAW_WECHATPAD_CALLBACK_PATH:-/api/callback/wechatpadpro}"
-# 企业微信社区插件策略（WeCom）
+# 企业微信插件策略（官方优先，社区兜底）
+WECOM_PLUGIN_OFFICIAL="@wecom/wecom-openclaw-plugin"
+WECOM_PLUGIN_OFFICIAL_VERSION_DEFAULT="${OPENCLAW_WECOM_PLUGIN_OFFICIAL_VERSION:-1.0.10}"
 WECOM_PLUGIN_COMMUNITY="@marshulll/openclaw-wecom"
-WECOM_PLUGIN_VERSION_DEFAULT="${OPENCLAW_WECOM_PLUGIN_VERSION:-0.1.41}"
+WECOM_PLUGIN_COMMUNITY_VERSION_DEFAULT="${OPENCLAW_WECOM_PLUGIN_VERSION:-0.1.41}"
 WECOM_WEBHOOK_BOT_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_BOT_PATH:-/wecom/bot}"
 WECOM_WEBHOOK_APP_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_APP_PATH:-/wecom/app}"
 # 钉钉社区插件策略（DingTalk）
@@ -3932,7 +3934,7 @@ config_channels_unofficial() {
 
     print_menu_item "1" "微信（LangBot WeChatPad，社区）" "🟢"
     print_menu_item "2" "QQ（社区插件）" "🐧"
-    print_menu_item "3" "企业微信（WeCom，社区插件）" "🏬"
+    print_menu_item "3" "企业微信（WeCom，官方优先）" "🏬"
     print_menu_item "4" "钉钉（DingTalk，社区插件）" "📲"
     print_menu_item "5" "钉钉/QQ/企业微信 官方状态检查" "🧾"
     print_menu_item "6" "iMessage（旧版）" "🍎"
@@ -4273,6 +4275,13 @@ plugin_bundle_slug_from_spec() {
     echo "$slug"
 }
 
+plugin_bundle_pack_name_from_spec() {
+    local spec="$1"
+    local base="${spec%@*}"
+    base="${base#@}"
+    echo "${base//\//-}"
+}
+
 resolve_official_plugins_bundle_dir() {
     local script_dir
     local local_bundle
@@ -4323,15 +4332,22 @@ resolve_official_plugin_local_source() {
     local plugin_spec="$1"
     local bundle_dir="$2"
     local slug
+    local pack_name
     local candidate
 
     slug="$(plugin_bundle_slug_from_spec "$plugin_spec")"
+    pack_name="$(plugin_bundle_pack_name_from_spec "$plugin_spec")"
     for candidate in \
         "$bundle_dir/$slug" \
+        "$bundle_dir/$pack_name" \
         "$bundle_dir/${slug}.tgz" \
+        "$bundle_dir/${pack_name}.tgz" \
         "$bundle_dir/archives/${slug}.tgz" \
+        "$bundle_dir/archives/${pack_name}.tgz" \
         "$bundle_dir/archives/${slug}-"*.tgz \
-        "$bundle_dir/archives/openclaw-${slug}-"*.tgz; do
+        "$bundle_dir/archives/${pack_name}-"*.tgz \
+        "$bundle_dir/archives/openclaw-${slug}-"*.tgz \
+        "$bundle_dir/archives/openclaw-${pack_name}-"*.tgz; do
         [ -e "$candidate" ] || continue
         echo "$candidate"
         return 0
@@ -4482,12 +4498,12 @@ check_cn_enterprise_channel_official_status() {
     echo ""
     echo -e "  • 钉钉（DingTalk）: ${YELLOW}当前未发现官方插件${NC}"
     echo -e "  • QQ: ${YELLOW}当前未发现官方插件${NC}"
-    echo -e "  • 企业微信（WeCom）: ${YELLOW}当前未发现官方插件${NC}"
+    echo -e "  • 企业微信（WeCom）: ${GREEN}已有官方生态插件 @wecom/wecom-openclaw-plugin${NC}"
     echo ""
     echo -e "${CYAN}可选社区方案（非官方，需自行评估风险）:${NC}"
     echo "  • QQ: @sliverp/qqbot（本菜单提供安装/探针/回滚）"
     echo "  • 微信: openclaw-wechat-channel（按 LangBot WeChatPad 适配流程）"
-    echo "  • 企业微信: @marshulll/openclaw-wecom（本菜单提供安装/探针/回滚）"
+    echo "  • 企业微信: @marshulll/openclaw-wecom（社区兜底）"
     echo ""
     echo -e "${CYAN}已纳入的官方企业渠道替代项:${NC}"
     echo "  • 飞书（Feishu）"
@@ -4497,7 +4513,7 @@ check_cn_enterprise_channel_official_status() {
     echo "  • Mattermost（插件）"
     echo ""
     echo -e "${YELLOW}说明:${NC} 为避免与官方能力漂移，本安装器仅默认纳入已发布的官方渠道插件。"
-    echo -e "${YELLOW}补充:${NC} 企业微信/QQ/微信目前按社区插件方案接入。"
+    echo -e "${YELLOW}补充:${NC} 企业微信默认官方优先，QQ/微信仍为社区方案。"
     echo ""
     press_enter
 }
@@ -4587,8 +4603,11 @@ rollback_wecom_community_config() {
 
     openclaw plugins disable wecom > /dev/null 2>&1 || true
     openclaw plugins disable openclaw-wecom > /dev/null 2>&1 || true
+    openclaw plugins disable wecom-openclaw-plugin > /dev/null 2>&1 || true
     openclaw plugins uninstall wecom --keep-files > /dev/null 2>&1 || true
     openclaw plugins uninstall openclaw-wecom --keep-files > /dev/null 2>&1 || true
+    openclaw plugins uninstall wecom-openclaw-plugin --keep-files > /dev/null 2>&1 || true
+    openclaw plugins uninstall "$WECOM_PLUGIN_OFFICIAL" --keep-files > /dev/null 2>&1 || true
     openclaw plugins uninstall "$WECOM_PLUGIN_COMMUNITY" --keep-files > /dev/null 2>&1 || true
 
     if openclaw config --help 2>/dev/null | grep -q "unset"; then
@@ -4601,6 +4620,7 @@ rollback_wecom_community_config() {
 
     remove_plugin_from_allow "wecom" || true
     remove_plugin_from_allow "openclaw-wecom" || true
+    remove_plugin_from_allow "wecom-openclaw-plugin" || true
 
     log_info "企业微信配置回滚完成"
     if confirm "是否重启 Gateway 使回滚生效？" "y"; then
@@ -4617,8 +4637,11 @@ config_wecom_community_setup() {
 
     ensure_openclaw_init
 
-    local plugin_version="${OPENCLAW_WECOM_PLUGIN_VERSION:-$WECOM_PLUGIN_VERSION_DEFAULT}"
-    local plugin_spec="${WECOM_PLUGIN_COMMUNITY}@${plugin_version}"
+    local plugin_official_version="${OPENCLAW_WECOM_PLUGIN_OFFICIAL_VERSION:-$WECOM_PLUGIN_OFFICIAL_VERSION_DEFAULT}"
+    local plugin_community_version="${OPENCLAW_WECOM_PLUGIN_VERSION:-$WECOM_PLUGIN_COMMUNITY_VERSION_DEFAULT}"
+    local plugin_spec_official="${WECOM_PLUGIN_OFFICIAL}@${plugin_official_version}"
+    local plugin_spec_community="${WECOM_PLUGIN_COMMUNITY}@${plugin_community_version}"
+    local plugin_spec="$plugin_spec_official"
     local mode_choice mode
     local default_account
 
@@ -4634,24 +4657,27 @@ config_wecom_community_setup() {
     local callback_token=""
     local callback_aes=""
 
-    echo -e "${YELLOW}⚠️ 风险提示:${NC}"
-    echo "  • 企业微信当前不是 OpenClaw 官方渠道，依赖社区插件"
-    echo "  • 插件固定版本安装，降低升级漂移风险"
+    echo -e "${YELLOW}⚠️ 提示:${NC}"
+    echo "  • 企业微信插件将优先安装官方包，失败时自动回退社区包"
+    echo "  • 本安装器默认使用仓库内本地插件包，避免慢速远程下载"
     echo ""
-    echo -e "${CYAN}将安装:${NC} ${WHITE}${plugin_spec}${NC}"
+    echo -e "${CYAN}优先安装:${NC} ${WHITE}${plugin_spec_official}${NC}"
+    echo -e "${CYAN}失败回退:${NC} ${WHITE}${plugin_spec_community}${NC}"
     if ! confirm "继续安装并配置企业微信插件？" "n"; then
         log_info "已取消企业微信配置"
         return 0
     fi
 
-    if openclaw plugins install "$plugin_spec" --pin; then
-        log_info "企业微信插件安装成功"
+    if install_official_plugin_local_first "$plugin_spec_official" "wecom"; then
+        log_info "企业微信官方插件安装成功"
+    elif install_official_plugin_local_first "$plugin_spec_community" "wecom"; then
+        plugin_spec="$plugin_spec_community"
+        log_warn "已回退到企业微信社区插件: $plugin_spec_community"
+    elif ! openclaw plugins list 2>/dev/null | grep -Eqi "openclaw-wecom|wecom|wecom-openclaw-plugin"; then
+        log_error "未检测到企业微信插件，无法继续"
+        return 1
     else
-        log_warn "插件安装失败，尝试继续使用已安装版本"
-        if ! openclaw plugins list 2>/dev/null | grep -Eqi "openclaw-wecom|wecom"; then
-            log_error "未检测到企业微信插件，无法继续"
-            return 1
-        fi
+        log_warn "插件安装失败，继续尝试使用已安装版本"
     fi
 
     openclaw plugins enable wecom > /dev/null 2>&1 || openclaw plugins enable openclaw-wecom > /dev/null 2>&1 || true
@@ -4742,7 +4768,7 @@ config_wecom_community_setup() {
 config_wecom_community() {
     clear_screen
     print_header
-    echo -e "${WHITE}🏬 企业微信（WeCom，社区插件）${NC}"
+    echo -e "${WHITE}🏬 企业微信（WeCom，官方优先/社区兜底）${NC}"
     print_divider
     echo ""
     echo "  1) 安装并配置企业微信插件"
@@ -4877,7 +4903,7 @@ config_dingtalk_community_setup() {
 
     echo ""
     echo -e "${CYAN}安装插件: ${WHITE}${plugin_spec}${NC}"
-    if openclaw plugins install "$plugin_spec" --pin; then
+    if install_official_plugin_local_first "$plugin_spec" "dingtalk"; then
         log_info "钉钉社区插件安装成功"
     else
         log_warn "插件安装失败，尝试继续使用已安装版本"
@@ -5082,7 +5108,7 @@ config_qq_community_setup() {
 
     echo ""
     echo -e "${CYAN}安装插件: ${WHITE}${plugin_spec}${NC}"
-    if openclaw plugins install "$plugin_spec" --pin; then
+    if install_official_plugin_local_first "$plugin_spec" "qqbot"; then
         log_info "QQ 社区插件安装成功"
     else
         log_warn "插件安装失败，尝试继续使用已安装版本"
@@ -5317,7 +5343,7 @@ config_wechat_langbot_setup() {
 
     echo ""
     echo -e "${CYAN}安装插件: ${WHITE}${plugin_spec}${NC}"
-    if openclaw plugins install "$plugin_spec" --pin; then
+    if install_official_plugin_local_first "$plugin_spec" "wechat"; then
         log_info "微信社区插件安装成功"
     else
         log_warn "插件安装失败，尝试继续使用已安装版本"

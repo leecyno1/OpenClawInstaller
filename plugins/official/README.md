@@ -10,6 +10,10 @@
 ## 当前已打包（可本地安装）
 
 - `@openclaw/feishu`
+- `@wecom/wecom-openclaw-plugin`
+- `@marshulll/openclaw-wecom`
+- `@sliverp/qqbot`
+- `openclaw-channel-dingtalk`
 - `@openclaw/msteams`
 - `@openclaw/mattermost`
 - `@openclaw/matrix`
@@ -30,13 +34,14 @@
 ```bash
 mkdir -p plugins/official/archives
 for p in \
-  @openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix \
-  @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo \
-  @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat \
-  @openclaw/bluebubbles; do
+  @openclaw/feishu @wecom/wecom-openclaw-plugin @marshulll/openclaw-wecom \
+  @sliverp/qqbot openclaw-channel-dingtalk @openclaw/msteams @openclaw/mattermost \
+  @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch \
+  @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon \
+  @openclaw/synology-chat @openclaw/bluebubbles; do
   npm pack "$p" --silent
 done
-mv -f openclaw-*.tgz plugins/official/archives/
+mv -f ./*.tgz plugins/official/archives/
 ```
 
 说明：`signal/googlechat/irc` 等包如 npm 暂不可得，脚本会提示缺包并跳过；若确需远端拉取，可设置：

@@ -2,6 +2,10 @@
   "generatedAt": "2026-03-14",
   "packages": [
     "@openclaw/feishu",
+    "@wecom/wecom-openclaw-plugin",
+    "@marshulll/openclaw-wecom",
+    "@sliverp/qqbot",
+    "openclaw-channel-dingtalk",
     "@openclaw/msteams",
     "@openclaw/mattermost",
     "@openclaw/matrix",
