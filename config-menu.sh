@@ -131,18 +131,21 @@ AUTO_FIX_OPENCLAW_REPO_MIRROR_URL="${AUTO_FIX_OPENCLAW_REPO_MIRROR_URL:-https://
 AUTO_FIX_OPENCLAW_DIR="${AUTO_FIX_OPENCLAW_DIR:-$HOME/.openclaw/tools/auto-fix-openclaw}"
 AUTO_FIX_OPENCLAW_BIN="$AUTO_FIX_OPENCLAW_DIR/bin/auto-fix-openclaw"
 
-DEFAULT_OFFICIAL_PLUGINS="blogwatcher github gog gifgrep nano-banana-pro nano-pdf obsidian gemini summarize video-frames"
+DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
 ENHANCED_SKILLS_LIST="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx frontend-design web-design stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
-PROFILE_LOW_SKILLS="find-skills shell summarize web-search url-to-markdown"
-PROFILE_MEDIUM_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
-PROFILE_HIGH_SKILLS="__ALL_DEFAULT__"
+PROFILE_BASIC_SKILLS="find-skills shell summarize web-search url-to-markdown"
+PROFILE_EXTENDED_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
+PROFILE_SUPER_SKILLS="__ALL_DEFAULT__"
 RULE_PROFILE_MENU_SELECTED=""
 GEMINI_BASE_URL_DEFAULT="${GEMINI_BASE_URL:-${GOOGLE_BASE_URL:-}}"
 GEMINI_IMAGE_MODEL_DEFAULT="${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image-preview}"
 NANO_BANANA_BASE_URL_DEFAULT="${NANO_BANANA_BASE_URL:-}"
 NANO_BANANA_IMAGE_MODEL_DEFAULT="${NANO_BANANA_IMAGE_MODEL:-nano-banana-pro-image}"
 NANO_BANANA_VIDEO_MODEL_DEFAULT="${NANO_BANANA_VIDEO_MODEL:-nano-banana-pro-video}"
+SILICONFLOW_FALLBACK_API_URL="${OPENCLAW_UNOFFICIAL_OPENAI_API_URL:-https://api.siliconflow.cn/v1}"
+SILICONFLOW_FALLBACK_MODEL="${OPENCLAW_UNOFFICIAL_OPENAI_MODEL:-Qwen/Qwen3-8B}"
+UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE=0
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
 
@@ -669,21 +672,10 @@ get_profile_skill_list() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
-        low) echo "$PROFILE_LOW_SKILLS" ;;
-        medium) echo "$PROFILE_MEDIUM_SKILLS" ;;
-        high) echo "$PROFILE_HIGH_SKILLS" ;;
-        *) echo "$PROFILE_MEDIUM_SKILLS" ;;
-    esac
-}
-
-get_profile_model_pair() {
-    local level
-    level="$(normalize_rule_profile_level "$1")"
-    case "$level" in
-        low) echo "google/gemini-3.1-flash-lite-preview google/gemini-3-flash-preview" ;;
-        medium) echo "openai/gpt-5.1-codex openai/gpt-5.1-codex-mini" ;;
-        high) echo "anthropic/claude-opus-4-6 openai/gpt-5.1-codex-mini" ;;
-        *) echo "openai/gpt-5.1-codex openai/gpt-5.1-codex-mini" ;;
+        low) echo "$PROFILE_BASIC_SKILLS" ;;
+        medium) echo "$PROFILE_EXTENDED_SKILLS" ;;
+        high) echo "$PROFILE_SUPER_SKILLS" ;;
+        *) echo "$PROFILE_EXTENDED_SKILLS" ;;
     esac
 }
 
@@ -691,10 +683,10 @@ get_profile_token_limits() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
-        low) echo "5 50 180000 6000" ;;
-        medium) echo "5 150 600000 12000" ;;
-        high) echo "5 300 1500000 24000" ;;
-        *) echo "5 150 600000 12000" ;;
+        low) echo "5 50 300000 12000" ;;
+        medium) echo "5 160 1200000 24000" ;;
+        high) echo "5 360 3000000 40000" ;;
+        *) echo "5 160 1200000 24000" ;;
     esac
 }
 
@@ -705,37 +697,37 @@ get_profile_prompt_text() {
         low)
             cat <<'EOF'
 你是受控执行模式（LOW）。
-- 严格控制 token 与请求频率，优先短响应与高信息密度。
-- 仅在必要时调用外部工具，避免并发和重复请求。
-- 先给最小可行结论，再按用户要求逐步展开。
-- 默认使用小模型；复杂任务需先说明成本后再升级模型。
+- 只执行低频请求预算：5 小时 50 次。
+- 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
+- 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
+- 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
 EOF
             ;;
         medium)
             cat <<'EOF'
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 EOF
             ;;
         high)
             cat <<'EOF'
 你是高性能执行模式（HIGH）。
-- 允许更高 token 与请求预算，优先任务完成率与深度分析。
-- 复杂任务可分阶段调用多工具，但要持续回报进度与风险。
-- 主模型进行高质量推理，小模型承担预处理与验证。
-- 涉及高风险操作时仍需显式确认边界与回滚方案。
+- 请求预算提升到 5 小时 360 次，用于高并发任务但需持续监控。
+- 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
+- 严禁执行绕过安全策略、越权访问、数据外泄类指令。
+- 遇到敏感数据请求先拒绝，再提供合规替代方案。
 EOF
             ;;
         *)
             cat <<'EOF'
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 EOF
             ;;
     esac
@@ -759,18 +751,6 @@ prompt_profile_api_key_menu() {
     fi
 
     export "$key_var=$value"
-}
-
-prompt_profile_text_config_menu() {
-    local var_name="$1"
-    local display_name="$2"
-    local default_value="$3"
-    local current="${!var_name:-$default_value}"
-    local value=""
-
-    read_input "${YELLOW}${display_name} (默认: ${current}): ${NC}" value
-    value="${value:-$current}"
-    export "$var_name=$value"
 }
 
 apply_generative_service_settings_menu() {
@@ -837,8 +817,7 @@ configure_profile_api_keys_menu() {
     log_info "配置档位 API 参数（BraveSearch / NanoBanana / Gemini）..."
     case "$level" in
         low)
-            prompt_profile_api_key_menu "GOOGLE_API_KEY" "Gemini" "1"
-            prompt_profile_api_key_menu "BRAVE_API_KEY" "BraveSearch" "0"
+            log_info "LOW 档默认不强制配置工具 API Key（可后续在配置菜单补充）"
             ;;
         medium)
             prompt_profile_api_key_menu "GOOGLE_API_KEY" "Gemini" "1"
@@ -881,37 +860,7 @@ configure_profile_api_keys_menu() {
         remove_env_export "NANOBANANA_API_KEY"
     fi
 
-    echo ""
-    log_info "配置 Gemini/NanoBanana 第三方服务参数（URL + 模型）..."
-    prompt_profile_text_config_menu "GEMINI_BASE_URL" "Gemini 服务 URL" "$GEMINI_BASE_URL_DEFAULT"
-    prompt_profile_text_config_menu "GEMINI_IMAGE_MODEL" "Gemini 图片模型名" "$GEMINI_IMAGE_MODEL_DEFAULT"
-    prompt_profile_text_config_menu "NANO_BANANA_BASE_URL" "NanoBanana 服务 URL" "$NANO_BANANA_BASE_URL_DEFAULT"
-    prompt_profile_text_config_menu "NANO_BANANA_IMAGE_MODEL" "NanoBanana 图片模型名" "$NANO_BANANA_IMAGE_MODEL_DEFAULT"
-    prompt_profile_text_config_menu "NANO_BANANA_VIDEO_MODEL" "NanoBanana 视频模型名" "$NANO_BANANA_VIDEO_MODEL_DEFAULT"
-
     apply_generative_service_settings_menu
-}
-
-apply_profile_model_policy_menu() {
-    local level pair primary_model small_model
-    level="$(normalize_rule_profile_level "$1")"
-    pair="$(get_profile_model_pair "$level")"
-    primary_model="${pair%% *}"
-    small_model="${pair#* }"
-
-    upsert_env_export "OPENCLAW_PRIMARY_MODEL" "$primary_model"
-    upsert_env_export "OPENCLAW_SMALL_MODEL" "$small_model"
-    upsert_env_export "OPENCLAW_RULE_PROFILE" "$level"
-
-    if check_openclaw_installed; then
-        openclaw config set "vendor.control.profile" "$level" >/dev/null 2>&1 || true
-        openclaw config set "vendor.control.models.primary" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "vendor.control.models.small" "$small_model" >/dev/null 2>&1 || true
-        openclaw config set "agents.defaults.model.primary" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "agents.defaults.model.small" "$small_model" >/dev/null 2>&1 || true
-        openclaw config set "models.default" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "models.small" "$small_model" >/dev/null 2>&1 || true
-    fi
 }
 
 apply_profile_token_policy_menu() {
@@ -991,7 +940,7 @@ apply_profile_skill_policy_menu() {
 
 write_profile_policy_files_menu() {
     local level limits window_hours max_requests max_tokens max_tokens_per_req
-    local pair primary_model small_model prompt_text now_iso
+    local prompt_text now_iso
     local gemini_url gemini_model nano_url nano_image_model nano_video_model
     local policy_dir soul_dir agent_dir memory_dir session_dir
     local system_rule_file memory_rule_file session_rule_file soul_rule_file policy_json prompt_file
@@ -1003,9 +952,6 @@ write_profile_policy_files_menu() {
     max_tokens="$(echo "$limits" | awk '{print $3}')"
     max_tokens_per_req="$(echo "$limits" | awk '{print $4}')"
 
-    pair="$(get_profile_model_pair "$level")"
-    primary_model="${pair%% *}"
-    small_model="${pair#* }"
     gemini_url="${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}"
     gemini_model="${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}"
     nano_url="${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT}"
@@ -1036,11 +982,15 @@ write_profile_policy_files_menu() {
 - 请求上限: ${max_requests}
 - Token 上限: ${max_tokens}
 - 单请求 Token 上限: ${max_tokens_per_req}
-- 主模型: ${primary_model}
-- 小模型: ${small_model}
 
 ## 执行提示词
 ${prompt_text}
+
+## 风险行为硬限制
+- 禁止输出任何 API Key、令牌、会话凭据、私钥、数据库密码。
+- 禁止协助绕过模型调用限制、权限限制或网关限制。
+- 禁止暴露用户敏感信息（身份、联系方式、地址、财务、医疗等）。
+- 遇到敏感请求必须拒绝，并返回合规替代方案。
 EOF
 
     cat > "$memory_rule_file" <<EOF
@@ -1048,8 +998,8 @@ EOF
 
 记忆要求：
 - 始终遵循档位 ${level} 的预算控制。
-- 连续高并发请求时先降级到小模型并压缩响应。
 - 当预算接近上限时先返回摘要与下一步建议，避免超限。
+- 不记录或复述明文密钥与敏感凭据。
 EOF
 
     cat > "$session_rule_file" <<EOF
@@ -1059,6 +1009,7 @@ EOF
 1. 优先满足可用性，其次控制成本。
 2. 每 ${window_hours} 小时最多 ${max_requests} 次请求。
 3. 单请求建议 Token 不超过 ${max_tokens_per_req}。
+4. 拒绝密钥泄露、越权请求和敏感信息外泄。
 EOF
 
     cat > "$soul_rule_file" <<EOF
@@ -1081,9 +1032,10 @@ EOF
     "maxTokens": ${max_tokens},
     "maxTokensPerRequest": ${max_tokens_per_req}
   },
-  "models": {
-    "primary": "${primary_model}",
-    "small": "${small_model}"
+  "riskControls": {
+    "blockSecretExposure": true,
+    "blockModelBypass": true,
+    "blockSensitiveDataExfiltration": true
   },
   "mediaServices": {
     "gemini": {
@@ -1110,24 +1062,24 @@ EOF
 
 ## LOW
 你是受控执行模式（LOW）。
-- 严格控制 token 与请求频率，优先短响应与高信息密度。
-- 仅在必要时调用外部工具，避免并发和重复请求。
-- 先给最小可行结论，再按用户要求逐步展开。
-- 默认使用小模型；复杂任务需先说明成本后再升级模型。
+- 只执行低频请求预算：5 小时 50 次。
+- 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
+- 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
+- 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
 
 ## MEDIUM
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 
 ## HIGH
 你是高性能执行模式（HIGH）。
-- 允许更高 token 与请求预算，优先任务完成率与深度分析。
-- 复杂任务可分阶段调用多工具，但要持续回报进度与风险。
-- 主模型进行高质量推理，小模型承担预处理与验证。
-- 涉及高风险操作时仍需显式确认边界与回滚方案。
+- 请求预算提升到 5 小时 360 次，用于高并发任务但需持续监控。
+- 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
+- 严禁执行绕过安全策略、越权访问、数据外泄类指令。
+- 遇到敏感数据请求先拒绝，再提供合规替代方案。
 EOF
 
     chmod 600 "$policy_json" 2>/dev/null || true
@@ -1151,9 +1103,9 @@ select_rule_profile_level_menu() {
     default_level="$(normalize_rule_profile_level "$RULE_PROFILE_DEFAULT")"
 
     echo -e "${CYAN}请选择厂商控制规则档位:${NC}"
-    echo -e "  ${CYAN}[1]${NC} LOW    - 低成本模式（5小时 50 次）"
-    echo -e "  ${CYAN}[2]${NC} MEDIUM - 平衡模式（5小时 150 次）"
-    echo -e "  ${CYAN}[3]${NC} HIGH   - 高性能模式（5小时 300 次）"
+    echo -e "  ${CYAN}[1]${NC} LOW    - 基础档（5小时 50 次）"
+    echo -e "  ${CYAN}[2]${NC} MEDIUM - 扩展档（5小时 160 次）"
+    echo -e "  ${CYAN}[3]${NC} HIGH   - 超级档（5小时 360 次）"
     echo ""
     read_input "${YELLOW}请选择 [1-3] (默认: 2): ${NC}" profile_choice
     profile_choice="${profile_choice:-2}"
@@ -1170,7 +1122,7 @@ select_rule_profile_level_menu() {
 }
 
 apply_vendor_rule_profile_menu() {
-    local level limits pair prompt_head
+    local level limits prompt_head
     select_rule_profile_level_menu
     level="$RULE_PROFILE_MENU_SELECTED"
     level="$(normalize_rule_profile_level "$level")"
@@ -1178,19 +1130,17 @@ apply_vendor_rule_profile_menu() {
 
     configure_profile_api_keys_menu "$level"
     apply_profile_token_policy_menu "$level"
-    apply_profile_model_policy_menu "$level"
     apply_profile_skill_policy_menu "$level" 0 || true
     write_profile_policy_files_menu "$level"
 
     limits="$(get_profile_token_limits "$level")"
-    pair="$(get_profile_model_pair "$level")"
     prompt_head="$(get_profile_prompt_text "$level" | head -1)"
 
     echo ""
     log_info "厂商控制规则注入完成"
     echo -e "  档位: ${WHITE}${level}${NC}"
     echo -e "  限流: ${WHITE}$(echo "$limits" | awk '{print $1"小时/"$2"次, 总Token="$3", 单次="$4}')${NC}"
-    echo -e "  模型: ${WHITE}${pair}${NC}"
+    echo -e "  Skills 档位: ${WHITE}$(case "$level" in low) echo 基础;; medium) echo 扩展;; high) echo 超级;; *) echo 扩展;; esac)${NC}"
     echo -e "  Gemini 服务: ${WHITE}${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT} | ${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  NanoBanana 服务: ${WHITE}${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT} | ${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  提示词摘要: ${WHITE}${prompt_head}${NC}"
@@ -3891,7 +3841,85 @@ config_channels_official() {
     esac
 }
 
+install_default_official_plugins_local_bundle_only() {
+    if ! check_openclaw_installed; then
+        return 1
+    fi
+
+    local plugin plugin_alias ok=0 fail=0
+    for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
+        plugin_alias="$(plugin_bundle_slug_from_spec "$plugin")"
+        if install_official_plugin_local_first "$plugin" "$plugin_alias"; then
+            ok=$((ok + 1))
+        else
+            fail=$((fail + 1))
+        fi
+    done
+
+    log_info "非官方渠道预置官方插件完成：成功 ${ok}，失败 ${fail}"
+    return 0
+}
+
+bootstrap_unofficial_channels_prerequisites() {
+    if [ "$UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE" = "1" ]; then
+        return 0
+    fi
+    UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE=1
+
+    if ! check_openclaw_installed; then
+        return 0
+    fi
+
+    echo ""
+    log_info "进入非官方渠道配置前，正在同步仓库内官方插件本地包..."
+    install_default_official_plugins_local_bundle_only || true
+}
+
+config_unofficial_fallback_model() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🛟 非官方渠道兜底模型（硅基流动）${NC}"
+    print_divider
+    echo ""
+    echo -e "${CYAN}默认地址:${NC} ${WHITE}${SILICONFLOW_FALLBACK_API_URL}${NC}"
+    echo -e "${CYAN}默认模型:${NC} ${WHITE}${SILICONFLOW_FALLBACK_MODEL}${NC}"
+    echo -e "${GRAY}仅需填写 API Key，不会覆盖你的主模型配置。${NC}"
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        press_enter
+        return
+    fi
+
+    local fallback_key=""
+    read_secret_input "${YELLOW}请输入 SiliconFlow API Key: ${NC}" fallback_key
+    if [ -z "$fallback_key" ]; then
+        log_error "API Key 不能为空"
+        press_enter
+        return
+    fi
+
+    openclaw config set channels.unofficial.fallback.enabled true >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.fallback.provider openai >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.fallback.openaiApiUrl "$SILICONFLOW_FALLBACK_API_URL" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.fallback.model "$SILICONFLOW_FALLBACK_MODEL" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.fallback.apiKey "$fallback_key" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.fallback.openaiApiUrl "$SILICONFLOW_FALLBACK_API_URL" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.fallback.model "$SILICONFLOW_FALLBACK_MODEL" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.fallback.apiKey "$fallback_key" >/dev/null 2>&1 || true
+
+    upsert_env_export "OPENCLAW_UNOFFICIAL_OPENAI_API_URL" "$SILICONFLOW_FALLBACK_API_URL"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_OPENAI_MODEL" "$SILICONFLOW_FALLBACK_MODEL"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_OPENAI_API_KEY" "$fallback_key"
+
+    log_info "非官方渠道兜底模型已保存（硅基流动）"
+    echo -e "${CYAN}已写入:${NC} channels.unofficial.fallback.* / plugins.community.fallback.*"
+    press_enter
+}
+
 config_channels_unofficial() {
+    bootstrap_unofficial_channels_prerequisites
     clear_screen
     print_header
 
@@ -3908,10 +3936,11 @@ config_channels_unofficial() {
     print_menu_item "4" "钉钉（DingTalk，社区插件）" "📲"
     print_menu_item "5" "钉钉/QQ/企业微信 官方状态检查" "🧾"
     print_menu_item "6" "iMessage（旧版）" "🍎"
+    print_menu_item "7" "非官方渠道兜底模型（硅基流动）" "🛟"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
 
-    echo -en "${YELLOW}请选择 [0-6]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-7]: ${NC}"
     read choice < "$TTY_INPUT"
 
     case $choice in
@@ -3921,6 +3950,7 @@ config_channels_unofficial() {
         4) config_dingtalk_community ;;
         5) check_cn_enterprise_channel_official_status ;;
         6) config_imessage ;;
+        7) config_unofficial_fallback_model ;;
         0) return ;;
         *) log_error "无效选择"; press_enter; config_channels_unofficial ;;
     esac
@@ -4236,6 +4266,114 @@ get_official_channel_package() {
     esac
 }
 
+plugin_bundle_slug_from_spec() {
+    local spec="$1"
+    local slug="${spec##*/}"
+    slug="${slug%@*}"
+    echo "$slug"
+}
+
+resolve_official_plugins_bundle_dir() {
+    local script_dir
+    local local_bundle
+    local cache_root
+    local cache_repo
+    local cache_bundle
+    local tmp_repo
+    local url
+
+    script_dir="$(get_config_menu_script_dir)"
+    local_bundle="$script_dir/plugins/official"
+    if [ -d "$local_bundle" ]; then
+        echo "$local_bundle"
+        return 0
+    fi
+
+    cache_root="$CONFIG_DIR/.cache"
+    cache_repo="$cache_root/auto-install-openclaw-repo"
+    cache_bundle="$cache_repo/plugins/official"
+    mkdir -p "$cache_root" 2>/dev/null || true
+
+    if [ -d "$cache_bundle" ]; then
+        echo "$cache_bundle"
+        return 0
+    fi
+
+    if ! command -v git >/dev/null 2>&1; then
+        return 1
+    fi
+
+    tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+    for url in $(get_installer_repo_urls); do
+        rm -rf "$tmp_repo" 2>/dev/null || true
+        tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+        if git clone --depth 1 "$url" "$tmp_repo" >/dev/null 2>&1 && [ -d "$tmp_repo/plugins/official" ]; then
+            rm -rf "$cache_repo" 2>/dev/null || true
+            mv "$tmp_repo" "$cache_repo"
+            echo "$cache_repo/plugins/official"
+            return 0
+        fi
+    done
+
+    rm -rf "$tmp_repo" 2>/dev/null || true
+    return 1
+}
+
+resolve_official_plugin_local_source() {
+    local plugin_spec="$1"
+    local bundle_dir="$2"
+    local slug
+    local candidate
+
+    slug="$(plugin_bundle_slug_from_spec "$plugin_spec")"
+    for candidate in \
+        "$bundle_dir/$slug" \
+        "$bundle_dir/${slug}.tgz" \
+        "$bundle_dir/archives/${slug}.tgz" \
+        "$bundle_dir/archives/${slug}-"*.tgz \
+        "$bundle_dir/archives/openclaw-${slug}-"*.tgz; do
+        [ -e "$candidate" ] || continue
+        echo "$candidate"
+        return 0
+    done
+
+    return 1
+}
+
+install_official_plugin_local_first() {
+    local plugin_spec="$1"
+    local enable_alias="${2:-}"
+    local bundle_dir
+    local local_source
+
+    if ! bundle_dir="$(resolve_official_plugins_bundle_dir 2>/dev/null)"; then
+        log_warn "未找到官方插件本地包目录（plugins/official）"
+        bundle_dir=""
+    fi
+
+    if [ -n "$bundle_dir" ]; then
+        local_source="$(resolve_official_plugin_local_source "$plugin_spec" "$bundle_dir" 2>/dev/null || true)"
+        if [ -n "$local_source" ]; then
+            if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
+                [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
+                return 0
+            fi
+            log_warn "本地官方插件包安装失败: $plugin_spec -> $local_source"
+        else
+            log_warn "仓库中缺少官方插件本地包: $plugin_spec"
+        fi
+    fi
+
+    if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ]; then
+        if openclaw plugins install "$plugin_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin_spec" >/dev/null 2>&1; then
+            [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 config_official_plugin_channel() {
     local channel="$1"
     local display_name="$2"
@@ -4263,14 +4401,14 @@ config_official_plugin_channel() {
     fi
 
     echo -e "${CYAN}该渠道使用官方插件: ${WHITE}${pkg}${NC}"
-    echo -e "${CYAN}将执行: 安装插件 -> 启用插件 -> 渠道配置向导${NC}"
+    echo -e "${CYAN}将执行: 本地包安装插件 -> 启用插件 -> 渠道配置向导${NC}"
     echo ""
 
     if confirm "是否安装/更新官方插件 ${pkg}？" "y"; then
-        if openclaw plugins install "$pkg" --pin; then
-            log_info "官方插件安装成功: $pkg"
+        if install_official_plugin_local_first "$pkg" "$channel"; then
+            log_info "官方插件安装成功: $pkg（本地包优先）"
         else
-            log_warn "插件安装失败，继续尝试使用已安装版本配置渠道"
+            log_warn "插件安装失败（未启用远端兜底时不会从网络下载），继续尝试使用已安装版本配置渠道"
         fi
     fi
 
@@ -5349,15 +5487,7 @@ install_feishu_plugin() {
     echo -e "${CYAN}正在安装飞书插件 ${preferred_spec} ...${NC}"
     echo ""
     
-    # 仅安装官方插件包，并 pin 版本，降低后续升级漂移风险
-    local install_output
-    install_output=$(openclaw plugins install "$preferred_spec" --pin 2>&1)
-    local install_exit=$?
-    
-    # 过滤掉 banner，显示关键信息
-    echo "$install_output" | grep -v "^🦞" | grep -v "^$" | head -5
-    
-    if [ $install_exit -eq 0 ]; then
+    if install_official_plugin_local_first "$preferred_spec" "feishu"; then
         openclaw plugins enable feishu > /dev/null 2>&1 || true
         ensure_plugin_in_allow "feishu"
         echo ""
@@ -5369,7 +5499,8 @@ install_feishu_plugin() {
         
         echo ""
         log_error "飞书插件安装失败，请手动重试"
-        echo -e "${CYAN}官方插件:${NC} ${WHITE}openclaw plugins install $FEISHU_PLUGIN_OFFICIAL${NC}"
+        echo -e "${CYAN}本地包目录:${NC} ${WHITE}plugins/official${NC}"
+        echo -e "${CYAN}远端兜底(可选):${NC} ${WHITE}OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK=1 openclaw plugins install $FEISHU_PLUGIN_OFFICIAL${NC}"
         return 1
     fi
 }
@@ -6317,10 +6448,11 @@ install_default_official_plugins_menu() {
         return 1
     fi
 
-    local plugin ok=0 fail=0
+    local plugin plugin_alias ok=0 fail=0
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
-        if openclaw plugins install "$plugin" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin" >/dev/null 2>&1; then
-            openclaw plugins enable "$plugin" >/dev/null 2>&1 || true
+        plugin_alias="$(plugin_bundle_slug_from_spec "$plugin")"
+        if install_official_plugin_local_first "$plugin" "$plugin_alias"; then
+            openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
             log_info "已安装官方插件: $plugin"
             ok=$((ok + 1))
         else
@@ -6345,7 +6477,7 @@ manage_official_plugins() {
     fi
 
     print_menu_item "1" "查看官方插件列表" "📋"
-    print_menu_item "2" "安装默认官方插件集" "📦"
+    print_menu_item "2" "安装默认官方插件集（本地包）" "📦"
     print_menu_item "3" "更新全部插件" "⬆️"
     print_menu_item "4" "跳转官方 Skills 设置" "🚀"
     print_menu_item "0" "返回上级菜单" "↩️"

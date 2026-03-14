@@ -21,7 +21,7 @@ pass "upgrade pipeline markers"
 # 3) 飞书官方插件默认检查
 grep -q 'FEISHU_PLUGIN_OFFICIAL="@openclaw/feishu"' config-menu.sh || fail "missing official feishu plugin default"
 grep -q "channels.feishu.accounts.main.appId" config-menu.sh || fail "missing feishu accounts.main.appId config path"
-grep -q 'openclaw plugins install "$preferred_spec" --pin' config-menu.sh || fail "missing pinned official feishu install"
+grep -q 'install_official_plugin_local_first "$preferred_spec" "feishu"' config-menu.sh || fail "missing local-first official feishu install path"
 pass "feishu plugin default marker"
 
 # 4) 安装器官方兼容关键点

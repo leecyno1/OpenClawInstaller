@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-03-14",
+  "packages": [
+    "@openclaw/feishu",
+    "@openclaw/msteams",
+    "@openclaw/mattermost",
+    "@openclaw/matrix",
+    "@openclaw/line",
+    "@openclaw/nextcloud-talk",
+    "@openclaw/twitch",
+    "@openclaw/zalo",
+    "@openclaw/zalouser",
+    "@openclaw/nostr",
+    "@openclaw/tlon",
+    "@openclaw/synology-chat",
+    "@openclaw/bluebubbles"
+  ],
+  "note": "scripts prefer local bundle under plugins/official; set OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK=1 to allow remote install fallback"
+}

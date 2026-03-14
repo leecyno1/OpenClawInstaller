@@ -10,50 +10,61 @@
 
 ## 注入项
 
-1. Token/请求管理
-- LOW：5 小时最多 50 次，请求总 Token 180000，单次 6000
-- MEDIUM：5 小时最多 150 次，请求总 Token 600000，单次 12000
-- HIGH：5 小时最多 300 次，请求总 Token 1500000，单次 24000
+1. 请求频率与预算管理
+- LOW（基础档）：5 小时最多 50 次，请求总 Token 300000，单次 12000
+- MEDIUM（扩展档）：5 小时最多 160 次，请求总 Token 1200000，单次 24000
+- HIGH（超级档）：5 小时最多 360 次，请求总 Token 3000000，单次 40000
 
 2. Skills 档位安装
-- LOW：轻量能力集（`find-skills`、`shell`、`summarize`、`web-search`、`url-to-markdown`）
-- MEDIUM：增强能力集（自动化、反思、MCP、文档与表格能力等，含 `gemini-image-service`、`nano-banana-service`）
-- HIGH：安装 `skills/default` 下全部默认技能包（含 `grok-imagine-1.0-video`）
+- LOW -> 基础 skills 包
+- MEDIUM -> 扩展 skills 包
+- HIGH -> 超级 skills 包（`skills/default` 全量）
 
-3. API 参数
-- 按档位引导配置：`Gemini`（`GOOGLE_API_KEY`）、`BraveSearch`（`BRAVE_API_KEY`）、`NanoBanana`（`NANO_BANANA_API_KEY`）
-- 同时写入兼容别名：`GEMINI_API_KEY`、`BRAVESEARCH_API_KEY`、`NANOBANANA_API_KEY`
-- 同时支持第三方服务参数：
-  - `GEMINI_BASE_URL` / `GEMINI_IMAGE_MODEL`
-  - `NANO_BANANA_BASE_URL` / `NANO_BANANA_IMAGE_MODEL` / `NANO_BANANA_VIDEO_MODEL`
+3. API 参数（仅工具能力，不改主模型）
+- LOW：不强制
+- MEDIUM：Gemini + BraveSearch，NanoBanana 可选
+- HIGH：Gemini + BraveSearch + NanoBanana
+- 写入变量：`GOOGLE_API_KEY`、`BRAVE_API_KEY`、`NANO_BANANA_API_KEY`
+- 兼容别名：`GEMINI_API_KEY`、`BRAVESEARCH_API_KEY`、`NANOBANANA_API_KEY`
 
-4. 模型参数
-- LOW：`google/gemini-3.1-flash-lite-preview` + `google/gemini-3-flash-preview`
-- MEDIUM：`openai/gpt-5.1-codex` + `openai/gpt-5.1-codex-mini`
-- HIGH：`anthropic/claude-opus-4-6` + `openai/gpt-5.1-codex-mini`
+4. 风险行为限制（底层规则注入）
+- 禁止输出 API Key/Token/私钥/会话凭据
+- 禁止协助绕过模型限制、权限限制、网关限制
+- 禁止暴露用户敏感信息与隐私数据
+- 遇到敏感请求时拒绝并给出合规替代方案
 
 ## 三档提示词
 
 ### LOW
 你是受控执行模式（LOW）。
-- 严格控制 token 与请求频率，优先短响应与高信息密度。
-- 仅在必要时调用外部工具，避免并发和重复请求。
-- 先给最小可行结论，再按用户要求逐步展开。
-- 默认使用小模型；复杂任务需先说明成本后再升级模型。
+- 只执行低频请求预算：5 小时 50 次。
+- 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
+- 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
+- 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
 
 ### MEDIUM
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 
 ### HIGH
 你是高性能执行模式（HIGH）。
-- 允许更高 token 与请求预算，优先任务完成率与深度分析。
-- 复杂任务可分阶段调用多工具，但要持续回报进度与风险。
-- 主模型进行高质量推理，小模型承担预处理与验证。
-- 涉及高风险操作时仍需显式确认边界与回滚方案。
+- 请求预算提升到 5 小时 360 次，用于高并发任务但需持续监控。
+- 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
+- 严禁执行绕过安全策略、越权访问、数据外泄类指令。
+- 遇到敏感数据请求先拒绝，再提供合规替代方案。
+
+## 非官方渠道兜底模型
+
+在 `配置菜单 -> 非官方消息渠道配置 -> 非官方渠道兜底模型（硅基流动）` 中可设置：
+
+- `OPENCLAW_UNOFFICIAL_OPENAI_API_URL=https://api.siliconflow.cn/v1`
+- `OPENCLAW_UNOFFICIAL_OPENAI_MODEL=Qwen/Qwen3-8B`
+- 只需填写 API Key
+
+该设置写入 `channels.unofficial.fallback.*` 与 `plugins.community.fallback.*`，不会覆盖主模型配置。
 
 ## 执行入口
 

@@ -92,18 +92,19 @@ SWAP_THRESHOLD_MB="${OPENCLAW_SWAP_THRESHOLD_MB:-4096}"
 SWAP_TARGET_MB="${OPENCLAW_SWAP_TARGET_MB:-0}"
 SWAP_FILE_BASE="${OPENCLAW_SWAP_FILE:-/swapfile.openclaw}"
 AUTO_FIX_ATTEMPTED=0
-DEFAULT_OFFICIAL_PLUGINS="blogwatcher github gog gifgrep nano-banana-pro nano-pdf obsidian gemini summarize video-frames"
+DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 RULE_PROFILE_SELECTED="$(echo "${RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]')"
-
-PROFILE_LOW_SKILLS="find-skills shell summarize web-search url-to-markdown"
-PROFILE_MEDIUM_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
-PROFILE_HIGH_SKILLS="__ALL_DEFAULT__"
+PROFILE_BASIC_SKILLS="find-skills shell summarize web-search url-to-markdown"
+PROFILE_EXTENDED_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
+PROFILE_SUPER_SKILLS="__ALL_DEFAULT__"
 GEMINI_BASE_URL_DEFAULT="${GEMINI_BASE_URL:-${GOOGLE_BASE_URL:-}}"
 GEMINI_IMAGE_MODEL_DEFAULT="${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image-preview}"
 NANO_BANANA_BASE_URL_DEFAULT="${NANO_BANANA_BASE_URL:-}"
 NANO_BANANA_IMAGE_MODEL_DEFAULT="${NANO_BANANA_IMAGE_MODEL:-nano-banana-pro-image}"
 NANO_BANANA_VIDEO_MODEL_DEFAULT="${NANO_BANANA_VIDEO_MODEL:-nano-banana-pro-video}"
+SILICONFLOW_FALLBACK_API_URL="${OPENCLAW_UNOFFICIAL_OPENAI_API_URL:-https://api.siliconflow.cn/v1}"
+SILICONFLOW_FALLBACK_MODEL="${OPENCLAW_UNOFFICIAL_OPENAI_MODEL:-Qwen/Qwen3-8B}"
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
 
@@ -510,29 +511,10 @@ get_profile_skill_list() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
-        low) echo "$PROFILE_LOW_SKILLS" ;;
-        medium) echo "$PROFILE_MEDIUM_SKILLS" ;;
-        high) echo "$PROFILE_HIGH_SKILLS" ;;
-        *) echo "$PROFILE_MEDIUM_SKILLS" ;;
-    esac
-}
-
-get_profile_model_pair() {
-    local level
-    level="$(normalize_rule_profile_level "$1")"
-    case "$level" in
-        low)
-            echo "google/gemini-3.1-flash-lite-preview google/gemini-3-flash-preview"
-            ;;
-        medium)
-            echo "openai/gpt-5.1-codex openai/gpt-5.1-codex-mini"
-            ;;
-        high)
-            echo "anthropic/claude-opus-4-6 openai/gpt-5.1-codex-mini"
-            ;;
-        *)
-            echo "openai/gpt-5.1-codex openai/gpt-5.1-codex-mini"
-            ;;
+        low) echo "$PROFILE_BASIC_SKILLS" ;;
+        medium) echo "$PROFILE_EXTENDED_SKILLS" ;;
+        high) echo "$PROFILE_SUPER_SKILLS" ;;
+        *) echo "$PROFILE_EXTENDED_SKILLS" ;;
     esac
 }
 
@@ -541,16 +523,16 @@ get_profile_token_limits() {
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
         low)
-            echo "5 50 180000 6000"
+            echo "5 50 300000 12000"
             ;;
         medium)
-            echo "5 150 600000 12000"
+            echo "5 160 1200000 24000"
             ;;
         high)
-            echo "5 300 1500000 24000"
+            echo "5 360 3000000 40000"
             ;;
         *)
-            echo "5 150 600000 12000"
+            echo "5 160 1200000 24000"
             ;;
     esac
 }
@@ -562,37 +544,37 @@ get_profile_prompt_text() {
         low)
             cat <<'EOF'
 你是受控执行模式（LOW）。
-- 严格控制 token 与请求频率，优先短响应与高信息密度。
-- 仅在必要时调用外部工具，避免并发和重复请求。
-- 先给最小可行结论，再按用户要求逐步展开。
-- 默认使用小模型；复杂任务需先说明成本后再升级模型。
+- 只执行低频请求预算：5 小时 50 次。
+- 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
+- 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
+- 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
 EOF
             ;;
         medium)
             cat <<'EOF'
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 EOF
             ;;
         high)
             cat <<'EOF'
 你是高性能执行模式（HIGH）。
-- 允许更高 token 与请求预算，优先任务完成率与深度分析。
-- 复杂任务可分阶段调用多工具，但要持续回报进度与风险。
-- 主模型进行高质量推理，小模型承担预处理与验证。
-- 涉及高风险操作时仍需显式确认边界与回滚方案。
+- 请求预算提升到 5 小时 360 次，用于高并发任务但需持续监控。
+- 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
+- 严禁执行绕过安全策略、越权访问、数据外泄类指令。
+- 遇到敏感数据请求先拒绝，再提供合规替代方案。
 EOF
             ;;
         *)
             cat <<'EOF'
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 EOF
             ;;
     esac
@@ -607,9 +589,9 @@ select_rule_profile_level() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${WHITE}  厂商控制规则注入档位${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  ${CYAN}[1]${NC} LOW    - 低成本模式（5小时 50 次）"
-    echo -e "  ${CYAN}[2]${NC} MEDIUM - 平衡模式（5小时 150 次）"
-    echo -e "  ${CYAN}[3]${NC} HIGH   - 高性能模式（5小时 300 次）"
+    echo -e "  ${CYAN}[1]${NC} LOW    - 基础档（5小时 50 次）"
+    echo -e "  ${CYAN}[2]${NC} MEDIUM - 扩展档（5小时 160 次）"
+    echo -e "  ${CYAN}[3]${NC} HIGH   - 超级档（5小时 360 次）"
     echo ""
 
     if [ "$NO_PROMPT" = "1" ] || [ "$TTY_INPUT" = "/dev/null" ]; then
@@ -667,23 +649,6 @@ prompt_profile_api_key() {
     fi
 
     export "$key_var=$value"
-}
-
-prompt_profile_text_config() {
-    local var_name="$1"
-    local display_name="$2"
-    local default_value="$3"
-    local current="${!var_name:-$default_value}"
-    local value="$current"
-
-    if [ "$NO_PROMPT" = "1" ] || [ "$TTY_INPUT" = "/dev/null" ]; then
-        export "$var_name=$value"
-        return 0
-    fi
-
-    read_input "${YELLOW}${display_name} (默认: ${current}): ${NC}" value
-    value="${value:-$current}"
-    export "$var_name=$value"
 }
 
 apply_generative_service_settings() {
@@ -753,8 +718,7 @@ configure_profile_api_keys() {
     log_step "配置档位 API 参数（BraveSearch / NanoBanana / Gemini）..."
     case "$level" in
         low)
-            prompt_profile_api_key "GOOGLE_API_KEY" "Gemini" "1"
-            prompt_profile_api_key "BRAVE_API_KEY" "BraveSearch" "0"
+            log_info "LOW 档默认不强制配置工具 API Key（可后续在配置菜单补充）"
             ;;
         medium)
             prompt_profile_api_key "GOOGLE_API_KEY" "Gemini" "1"
@@ -797,37 +761,7 @@ configure_profile_api_keys() {
         remove_env_export_install "NANOBANANA_API_KEY"
     fi
 
-    echo ""
-    log_step "配置 Gemini/NanoBanana 第三方服务参数（URL + 模型）..."
-    prompt_profile_text_config "GEMINI_BASE_URL" "Gemini 服务 URL" "$GEMINI_BASE_URL_DEFAULT"
-    prompt_profile_text_config "GEMINI_IMAGE_MODEL" "Gemini 图片模型名" "$GEMINI_IMAGE_MODEL_DEFAULT"
-    prompt_profile_text_config "NANO_BANANA_BASE_URL" "NanoBanana 服务 URL" "$NANO_BANANA_BASE_URL_DEFAULT"
-    prompt_profile_text_config "NANO_BANANA_IMAGE_MODEL" "NanoBanana 图片模型名" "$NANO_BANANA_IMAGE_MODEL_DEFAULT"
-    prompt_profile_text_config "NANO_BANANA_VIDEO_MODEL" "NanoBanana 视频模型名" "$NANO_BANANA_VIDEO_MODEL_DEFAULT"
-
     apply_generative_service_settings
-}
-
-apply_profile_model_policy() {
-    local level
-    level="$(normalize_rule_profile_level "$1")"
-    local pair primary_model small_model
-    pair="$(get_profile_model_pair "$level")"
-    primary_model="${pair%% *}"
-    small_model="${pair#* }"
-
-    upsert_env_export_install "OPENCLAW_PRIMARY_MODEL" "$primary_model"
-    upsert_env_export_install "OPENCLAW_SMALL_MODEL" "$small_model"
-
-    if check_command openclaw; then
-        openclaw config set "vendor.control.profile" "$level" >/dev/null 2>&1 || true
-        openclaw config set "vendor.control.models.primary" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "vendor.control.models.small" "$small_model" >/dev/null 2>&1 || true
-        openclaw config set "agents.defaults.model.primary" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "agents.defaults.model.small" "$small_model" >/dev/null 2>&1 || true
-        openclaw config set "models.default" "$primary_model" >/dev/null 2>&1 || true
-        openclaw config set "models.small" "$small_model" >/dev/null 2>&1 || true
-    fi
 }
 
 apply_profile_token_policy() {
@@ -918,7 +852,6 @@ write_profile_policy_files() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     local limits window_hours max_requests max_tokens max_tokens_per_req
-    local pair primary_model small_model
     local prompt_text
     local now_iso
     local gemini_url gemini_model nano_url nano_image_model nano_video_model
@@ -929,9 +862,6 @@ write_profile_policy_files() {
     max_tokens="$(echo "$limits" | awk '{print $3}')"
     max_tokens_per_req="$(echo "$limits" | awk '{print $4}')"
 
-    pair="$(get_profile_model_pair "$level")"
-    primary_model="${pair%% *}"
-    small_model="${pair#* }"
     gemini_url="${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}"
     gemini_model="${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}"
     nano_url="${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT}"
@@ -962,11 +892,15 @@ write_profile_policy_files() {
 - 请求上限: ${max_requests}
 - Token 上限: ${max_tokens}
 - 单请求 Token 上限: ${max_tokens_per_req}
-- 主模型: ${primary_model}
-- 小模型: ${small_model}
 
 ## 执行提示词
 ${prompt_text}
+
+## 风险行为硬限制
+- 禁止输出任何 API Key、令牌、会话凭据、私钥、数据库密码。
+- 禁止协助绕过模型调用限制、权限限制或网关限制。
+- 禁止暴露用户敏感信息（身份、联系方式、地址、财务、医疗等）。
+- 遇到敏感请求必须拒绝，并返回合规替代方案。
 EOF
 
     cat > "$memory_rule_file" <<EOF
@@ -974,8 +908,8 @@ EOF
 
 记忆要求：
 - 始终遵循档位 ${level} 的预算控制。
-- 连续高并发请求时先降级到小模型并压缩响应。
 - 当预算接近上限时先返回摘要与下一步建议，避免超限。
+- 不记录或复述明文密钥与敏感凭据。
 EOF
 
     cat > "$session_rule_file" <<EOF
@@ -985,6 +919,7 @@ EOF
 1. 优先满足可用性，其次控制成本。
 2. 每 ${window_hours} 小时最多 ${max_requests} 次请求。
 3. 单请求建议 Token 不超过 ${max_tokens_per_req}。
+4. 拒绝密钥泄露、越权请求和敏感信息外泄。
 EOF
 
     cat > "$soul_rule_file" <<EOF
@@ -1007,9 +942,10 @@ EOF
     "maxTokens": ${max_tokens},
     "maxTokensPerRequest": ${max_tokens_per_req}
   },
-  "models": {
-    "primary": "${primary_model}",
-    "small": "${small_model}"
+  "riskControls": {
+    "blockSecretExposure": true,
+    "blockModelBypass": true,
+    "blockSensitiveDataExfiltration": true
   },
   "mediaServices": {
     "gemini": {
@@ -1036,24 +972,24 @@ EOF
 
 ## LOW
 你是受控执行模式（LOW）。
-- 严格控制 token 与请求频率，优先短响应与高信息密度。
-- 仅在必要时调用外部工具，避免并发和重复请求。
-- 先给最小可行结论，再按用户要求逐步展开。
-- 默认使用小模型；复杂任务需先说明成本后再升级模型。
+- 只执行低频请求预算：5 小时 50 次。
+- 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
+- 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
+- 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
 
 ## MEDIUM
 你是平衡执行模式（MEDIUM）。
-- 在质量和成本之间平衡，默认中等篇幅、结构化回答。
-- 优先复用已有上下文与缓存结果，减少重复调用。
-- 允许有限并发工具调用，但必须先声明目标与预期输出。
-- 主模型负责决策，小模型负责检索、格式化和批处理。
+- 请求预算提升到 5 小时 160 次，仍需避免无效重复调用。
+- 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
+- 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
+- 输出涉及隐私数据时默认最小化披露并做脱敏。
 
 ## HIGH
 你是高性能执行模式（HIGH）。
-- 允许更高 token 与请求预算，优先任务完成率与深度分析。
-- 复杂任务可分阶段调用多工具，但要持续回报进度与风险。
-- 主模型进行高质量推理，小模型承担预处理与验证。
-- 涉及高风险操作时仍需显式确认边界与回滚方案。
+- 请求预算提升到 5 小时 360 次，用于高并发任务但需持续监控。
+- 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
+- 严禁执行绕过安全策略、越权访问、数据外泄类指令。
+- 遇到敏感数据请求先拒绝，再提供合规替代方案。
 EOF
 
     chmod 600 "$policy_json" 2>/dev/null || true
@@ -1079,14 +1015,12 @@ apply_vendor_rule_profile() {
     RULE_PROFILE_SELECTED="$level"
     upsert_env_export_install "OPENCLAW_RULE_PROFILE" "$level"
 
-    local limits pair prompt_text
+    local limits prompt_text
     limits="$(get_profile_token_limits "$level")"
-    pair="$(get_profile_model_pair "$level")"
     prompt_text="$(get_profile_prompt_text "$level")"
 
     configure_profile_api_keys "$level"
     apply_profile_token_policy "$level"
-    apply_profile_model_policy "$level"
     apply_profile_skill_policy "$level" || true
     write_profile_policy_files "$level"
 
@@ -1094,7 +1028,7 @@ apply_vendor_rule_profile() {
     log_info "厂商控制规则注入完成"
     echo -e "  档位: ${WHITE}${level}${NC}"
     echo -e "  限流: ${WHITE}$(echo "$limits" | awk '{print $1"小时/"$2"次, 总Token="$3", 单次="$4}')${NC}"
-    echo -e "  模型: ${WHITE}${pair}${NC}"
+    echo -e "  Skills 档位: ${WHITE}$(case "$level" in low) echo 基础;; medium) echo 扩展;; high) echo 超级;; *) echo 扩展;; esac)${NC}"
     echo -e "  Gemini 服务: ${WHITE}${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT} | ${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  NanoBanana 服务: ${WHITE}${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT} | ${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  提示词摘要: ${WHITE}$(echo "$prompt_text" | head -1)${NC}"
@@ -1947,16 +1881,53 @@ install_default_official_plugins() {
         return 0
     fi
 
-    log_step "安装默认官方插件集（blogwatcher/github/gog/gifgrep/nano-banana-pro/...）..."
+    local script_dir cache_root cache_repo bundle_dir slug local_dir local_archive local_archive_prefixed
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    cache_root="$CONFIG_DIR/.cache"
+    cache_repo="$cache_root/auto-install-openclaw-repo"
+    bundle_dir="$script_dir/plugins/official"
+    if [ ! -d "$bundle_dir" ] && [ -d "$cache_repo/plugins/official" ]; then
+        bundle_dir="$cache_repo/plugins/official"
+    fi
+
+    log_step "同步默认官方插件集（仓库本地包优先）..."
     local ok=0
     local fail=0
-    local plugin
+    local plugin spec
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
-        if openclaw plugins install "$plugin" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin" >/dev/null 2>&1; then
-            openclaw plugins enable "$plugin" >/dev/null 2>&1 || true
+        spec="$plugin"
+        slug="${spec#*@openclaw/}"
+        slug="${slug#/}"
+        local_dir="$bundle_dir/$slug"
+        local_archive="$bundle_dir/archives/${slug}.tgz"
+        local_archive_prefixed="$(ls -1 "$bundle_dir/archives/openclaw-${slug}-"*.tgz 2>/dev/null | head -1 || true)"
+
+        if [ -d "$local_dir" ] || [ -f "$local_archive" ] || [ -n "$local_archive_prefixed" ]; then
+            if [ -d "$local_dir" ] && (openclaw plugins install "$local_dir" --pin >/dev/null 2>&1 || openclaw plugins install "$local_dir" >/dev/null 2>&1); then
+                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
+                ok=$((ok + 1))
+                continue
+            fi
+            if [ -f "$local_archive" ] && (openclaw plugins install "$local_archive" --pin >/dev/null 2>&1 || openclaw plugins install "$local_archive" >/dev/null 2>&1); then
+                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
+                ok=$((ok + 1))
+                continue
+            fi
+            if [ -n "$local_archive_prefixed" ] && (openclaw plugins install "$local_archive_prefixed" --pin >/dev/null 2>&1 || openclaw plugins install "$local_archive_prefixed" >/dev/null 2>&1); then
+                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
+                ok=$((ok + 1))
+                continue
+            fi
+            log_warn "本地官方插件包安装失败: $spec"
+            fail=$((fail + 1))
+            continue
+        fi
+
+        if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
+            openclaw plugins enable "$slug" >/dev/null 2>&1 || true
             ok=$((ok + 1))
         else
-            log_warn "官方插件安装失败（可后续手动安装）: $plugin"
+            log_warn "官方插件本地包缺失或安装失败: $spec（仓库缺包时请补齐 plugins/official）"
             fail=$((fail + 1))
         fi
     done
@@ -3925,7 +3896,7 @@ main() {
         log_error "OpenClaw 安装失败"
         exit 1
     fi
-    install_default_official_plugins
+    log_info "已跳过初装阶段官方插件安装；将在后续配置菜单中按仓库本地包同步官方插件。"
     if [ "$NO_ONBOARD" = "1" ]; then
         log_info "已按参数跳过 AI 初始化向导 (--no-onboard)"
     else
