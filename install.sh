@@ -328,8 +328,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   NANO_BANANA_BASE_URL=<third_party_nano_url>
   NANO_BANANA_IMAGE_MODEL=<nano_image_model>
   NANO_BANANA_VIDEO_MODEL=<nano_video_model>
-  OPENCLAW_WELCOME_CHANNEL=<feishu|telegram|...>
-  OPENCLAW_WELCOME_TARGET=<chat:xxx|user:xxx|+8613...>
+  OPENCLAW_WELCOME_MESSAGE=<欢迎语，留空使用默认文案>
 EOF
 }
 
@@ -3357,12 +3356,10 @@ setup_identity() {
     local user_name="${OPENCLAW_USER_NAME:-主人}"
     local region="${OPENCLAW_USER_REGION:-中国大陆}"
     local timezone="${OPENCLAW_USER_TIMEZONE:-Asia/Shanghai}"
-    local user_goal="${OPENCLAW_USER_GOAL:-帮助我处理日常任务、信息检索与自动化执行}"
-    local personality="${OPENCLAW_ASSISTANT_PERSONALITY:-专业、直接、可靠}"
-    local work_style="${OPENCLAW_ASSISTANT_WORK_STYLE:-先澄清需求，再分步骤执行，关键节点主动反馈}"
-    local welcome_channel="${OPENCLAW_WELCOME_CHANNEL:-}"
-    local welcome_target="${OPENCLAW_WELCOME_TARGET:-}"
-    local welcome_text=""
+    local user_goal="${OPENCLAW_USER_GOAL:-综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等}"
+    local personality="${OPENCLAW_ASSISTANT_PERSONALITY:-严谨、适当幽默、务实}"
+    local work_style="${OPENCLAW_ASSISTANT_WORK_STYLE:-整段回复，主动汇报，积极响应并调用skills}"
+    local welcome_text="${OPENCLAW_WELCOME_MESSAGE:-你好我的主人，我是你的龙虾小助理，现在我已经上线了。现在你可以通过简单设置与飞书/钉钉/tele等进行配对，你就可以在通讯平台中给我布置任务啦！具体参照页面下方的配对指南}"
     local profile_doc="$CONFIG_DIR/docs/assistant-base-profile.md"
 
     if [ "$NO_PROMPT" != "1" ] && [ "$TTY_INPUT" != "/dev/null" ]; then
@@ -3375,20 +3372,19 @@ setup_identity() {
         read_input "${YELLOW}你的时区 (默认: ${timezone}): ${NC}" timezone
         timezone="${timezone:-${OPENCLAW_USER_TIMEZONE:-Asia/Shanghai}}"
         read_input "${YELLOW}你希望机器人主要做什么: ${NC}" user_goal
-        user_goal="${user_goal:-${OPENCLAW_USER_GOAL:-帮助我处理日常任务、信息检索与自动化执行}}"
+        user_goal="${user_goal:-${OPENCLAW_USER_GOAL:-综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等}}"
         read_input "${YELLOW}你希望机器人的性格: ${NC}" personality
-        personality="${personality:-${OPENCLAW_ASSISTANT_PERSONALITY:-专业、直接、可靠}}"
+        personality="${personality:-${OPENCLAW_ASSISTANT_PERSONALITY:-严谨、适当幽默、务实}}"
         read_input "${YELLOW}你希望机器人的工作方式: ${NC}" work_style
-        work_style="${work_style:-${OPENCLAW_ASSISTANT_WORK_STYLE:-先澄清需求，再分步骤执行，关键节点主动反馈}}"
+        work_style="${work_style:-${OPENCLAW_ASSISTANT_WORK_STYLE:-整段回复，主动汇报，积极响应并调用skills}}"
         echo ""
-        echo -e "${CYAN}欢迎消息发送配置（Gateway 启动后自动发送）${NC}"
-        read_input "${YELLOW}欢迎消息渠道（可选，留空自动探测）: ${NC}" welcome_channel
-        read_input "${YELLOW}欢迎消息目标（可选，如 chat:xxx/user:xxx/+8613...）: ${NC}" welcome_target
+        read_input "${YELLOW}欢迎消息（留空使用默认）: ${NC}" welcome_text
+        welcome_text="${welcome_text:-${OPENCLAW_WELCOME_MESSAGE:-你好我的主人，我是你的龙虾小助理，现在我已经上线了。现在你可以通过简单设置与飞书/钉钉/tele等进行配对，你就可以在通讯平台中给我布置任务啦！具体参照页面下方的配对指南}}"
     fi
 
-    welcome_text="你好 ${user_name}，我是 ${bot_name}。我会按照“${work_style}”的方式为你服务。"
-    upsert_env_export_install "OPENCLAW_WELCOME_CHANNEL" "$welcome_channel"
-    upsert_env_export_install "OPENCLAW_WELCOME_TARGET" "$welcome_target"
+    upsert_env_export_install "OPENCLAW_WELCOME_MESSAGE" "$welcome_text"
+    remove_env_export_install "OPENCLAW_WELCOME_CHANNEL"
+    remove_env_export_install "OPENCLAW_WELCOME_TARGET"
 
     if check_command openclaw; then
         openclaw config set identity.name "$bot_name" >/dev/null 2>&1 || true
@@ -3399,8 +3395,9 @@ setup_identity() {
         openclaw config set identity.personality "$personality" >/dev/null 2>&1 || true
         openclaw config set identity.work_style "$work_style" >/dev/null 2>&1 || true
         openclaw config set identity.greeting "$welcome_text" >/dev/null 2>&1 || true
-        openclaw config set identity.welcome.channel "$welcome_channel" >/dev/null 2>&1 || true
-        openclaw config set identity.welcome.target "$welcome_target" >/dev/null 2>&1 || true
+        openclaw config set identity.welcome.message "$welcome_text" >/dev/null 2>&1 || true
+        openclaw config unset identity.welcome.channel >/dev/null 2>&1 || true
+        openclaw config unset identity.welcome.target >/dev/null 2>&1 || true
         # 使首次会话时更容易读取到该人设
         openclaw config set "boot-md.enabled" true >/dev/null 2>&1 || true
         openclaw config set "session-memory.enabled" true >/dev/null 2>&1 || true
@@ -3429,8 +3426,7 @@ ${welcome_text}
   - ${WELCOME_DOC_URL_GITHUB}
 
 ## 启动后自动欢迎发送
-- 渠道: ${welcome_channel:-自动探测}
-- 目标: ${welcome_target:-自动探测（优先使用 allowFrom）}
+- 类型: 通用欢迎语（不区分消息渠道）
 EOF
     chmod 600 "$profile_doc" 2>/dev/null || true
 
@@ -3443,111 +3439,23 @@ EOF
 }
 
 build_post_install_welcome_message() {
-    local bot_name user_name region timezone user_goal personality work_style
-    bot_name="$(openclaw config get identity.name 2>/dev/null || echo "Clawd")"
-    user_name="$(openclaw config get identity.user_name 2>/dev/null || echo "朋友")"
-    region="$(openclaw config get identity.region 2>/dev/null || echo "中国大陆")"
-    timezone="$(openclaw config get identity.timezone 2>/dev/null || echo "Asia/Shanghai")"
-    user_goal="$(openclaw config get identity.goal 2>/dev/null || echo "协助完成信息检索与自动化任务")"
-    personality="$(openclaw config get identity.personality 2>/dev/null || echo "专业、直接、可靠")"
-    work_style="$(openclaw config get identity.work_style 2>/dev/null || echo "先澄清需求，再分步骤执行")"
+    local welcome_text
+    welcome_text="$(openclaw config get identity.welcome.message 2>/dev/null || true)"
+    if [ -z "$welcome_text" ] || [ "$welcome_text" = "undefined" ] || [ "$welcome_text" = "null" ]; then
+        welcome_text="$(openclaw config get identity.greeting 2>/dev/null || true)"
+    fi
+    if [ -z "$welcome_text" ] || [ "$welcome_text" = "undefined" ] || [ "$welcome_text" = "null" ]; then
+        welcome_text="${OPENCLAW_WELCOME_MESSAGE:-你好我的主人，我是你的龙虾小助理，现在我已经上线了。现在你可以通过简单设置与飞书/钉钉/tele等进行配对，你就可以在通讯平台中给我布置任务啦！具体参照页面下方的配对指南}"
+    fi
 
     cat <<EOF
-你好 ${user_name}，我是 ${bot_name}，已完成启动与默认配置。
-
-我可以协助你：
-1) 信息检索与摘要
-2) 自动化任务执行
-3) 文档与表格处理
-4) 多消息渠道联动
+${welcome_text}
 
 渠道配置入口：
 - bash ~/.openclaw/config-menu.sh（主菜单 3/4）
 - ${WELCOME_DOC_URL_GITEE}
 - ${WELCOME_DOC_URL_GITHUB}
-
-当前人设与工作方式：
-- 地区/时区：${region} / ${timezone}
-- 目标：${user_goal}
-- 性格：${personality}
-- 工作方式：${work_style}
-
-你可以先告诉我：你希望我今天先完成哪一件事。
 EOF
-}
-
-normalize_welcome_target_for_channel() {
-    local channel="$1"
-    local target="$2"
-    local t
-    t="$(echo "$target" | tr -d '[:space:]')"
-    [ -z "$t" ] && return 1
-    [ "$t" = "*" ] && return 1
-
-    case "$channel" in
-        feishu)
-            case "$t" in
-                chat:*|user:*)
-                    echo "$t"
-                    ;;
-                *)
-                    echo "user:$t"
-                    ;;
-            esac
-            ;;
-        *)
-            echo "$t"
-            ;;
-    esac
-}
-
-get_first_allow_from_target() {
-    local channel="$1"
-    local raw first
-
-    raw="$(openclaw config get "channels.${channel}.allowFrom" 2>/dev/null || true)"
-    if [ -z "$raw" ] || [ "$raw" = "undefined" ] || [ "$raw" = "null" ]; then
-        raw="$(openclaw config get "channels.${channel}.accounts.main.allowFrom" 2>/dev/null || true)"
-    fi
-
-    if [ -z "$raw" ] || [ "$raw" = "undefined" ] || [ "$raw" = "null" ]; then
-        return 1
-    fi
-
-    if echo "$raw" | grep -q '^\['; then
-        if check_command jq; then
-            first="$(echo "$raw" | jq -r '.[0] // empty' 2>/dev/null || true)"
-        else
-            first="$(echo "$raw" | sed -E 's/^\[\s*"([^"]+)".*$/\1/')"
-        fi
-    else
-        first="$(echo "$raw" | sed -E 's/^\s*"?([^",\]]+).*/\1/')"
-    fi
-
-    normalize_welcome_target_for_channel "$channel" "$first"
-}
-
-send_welcome_message_once() {
-    local channel="$1"
-    local target="$2"
-    local message="$3"
-    local output=""
-
-    set +e
-    output="$(openclaw message send --channel "$channel" --target "$target" --message "$message" --json 2>&1)"
-    local rc=$?
-    set -e
-
-    if [ $rc -ne 0 ]; then
-        return 1
-    fi
-    if echo "$output" | grep -q '"ok"[[:space:]]*:[[:space:]]*false'; then
-        return 1
-    fi
-    if echo "$output" | grep -qiE "error|unknown target|failed"; then
-        return 1
-    fi
-    return 0
 }
 
 send_post_install_welcome_message() {
@@ -3562,47 +3470,8 @@ send_post_install_welcome_message() {
 ${welcome_message}
 EOF
     chmod 600 "$CONFIG_DIR/docs/startup-welcome-message.md" 2>/dev/null || true
-
-    local configured_channel configured_target normalized_target
-    configured_channel="$(openclaw config get identity.welcome.channel 2>/dev/null || true)"
-    configured_target="$(openclaw config get identity.welcome.target 2>/dev/null || true)"
-    configured_channel="$(echo "$configured_channel" | tr -d '[:space:]')"
-    configured_target="$(echo "$configured_target" | tr -d '[:space:]')"
-
-    if [ -n "$configured_channel" ] && [ -n "$configured_target" ]; then
-        normalized_target="$(normalize_welcome_target_for_channel "$configured_channel" "$configured_target" || true)"
-        if [ -n "$normalized_target" ] && send_welcome_message_once "$configured_channel" "$normalized_target" "$welcome_message"; then
-            log_info "欢迎语已自动发送（${configured_channel} -> ${normalized_target}）"
-            return 0
-        fi
-        log_warn "欢迎语发送失败（配置目标不可达），将尝试自动探测 allowFrom。"
-    fi
-
-    local channels_json channel target
-    channels_json="$(openclaw channels list --json 2>/dev/null | awk 'BEGIN{p=0} /^\{/ {p=1} {if(p) print}')"
-    if [ -z "$channels_json" ]; then
-        log_warn "未获取到渠道列表，欢迎语仅保存到本地文档。"
-        return 1
-    fi
-
-    if ! check_command jq; then
-        log_warn "系统无 jq，无法自动解析渠道目标，欢迎语仅保存到本地文档。"
-        return 1
-    fi
-
-    while IFS= read -r channel; do
-        [ -n "$channel" ] || continue
-        target="$(get_first_allow_from_target "$channel" || true)"
-        [ -n "$target" ] || continue
-        if send_welcome_message_once "$channel" "$target" "$welcome_message"; then
-            log_info "欢迎语已自动发送（${channel} -> ${target}）"
-            return 0
-        fi
-    done < <(echo "$channels_json" | jq -r '.chat | keys[]?' 2>/dev/null)
-
-    log_warn "未找到可用发送目标，欢迎语已写入: $CONFIG_DIR/docs/startup-welcome-message.md"
-    log_warn "可手动发送：openclaw message send --channel <渠道> --target <目标> --message \"$(echo "$welcome_message" | head -1)\""
-    return 1
+    log_info "欢迎语已更新为通用文案（不再按渠道/目标自动探测发送）"
+    return 0
 }
 
 

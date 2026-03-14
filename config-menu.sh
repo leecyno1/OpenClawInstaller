@@ -5905,81 +5905,15 @@ EOF
 # ================================ 身份配置 ================================
 
 build_identity_welcome_message_menu() {
-    local bot_name="$1"
-    local user_name="$2"
-    local region="$3"
-    local timezone="$4"
-    local user_goal="$5"
-    local personality="$6"
-    local work_style="$7"
+    local welcome_text="$1"
     cat <<EOF
-你好 ${user_name}，我是 ${bot_name}，已完成启动与默认配置。
-
-我可以协助你：
-1) 信息检索与摘要
-2) 自动化任务执行
-3) 文档与表格处理
-4) 多消息渠道联动
+${welcome_text}
 
 渠道配置入口：
 - bash ~/.openclaw/config-menu.sh（主菜单 3/4）
 - ${WELCOME_DOC_URL_GITEE}
 - ${WELCOME_DOC_URL_GITHUB}
-
-当前人设与工作方式：
-- 地区/时区：${region} / ${timezone}
-- 目标：${user_goal}
-- 性格：${personality}
-- 工作方式：${work_style}
-
-你可以先告诉我：你希望我今天先完成哪一件事。
 EOF
-}
-
-normalize_welcome_target_for_channel_menu() {
-    local channel="$1"
-    local target="$2"
-    local t
-    t="$(echo "$target" | tr -d '[:space:]')"
-    [ -z "$t" ] && return 1
-    [ "$t" = "*" ] && return 1
-    case "$channel" in
-        feishu)
-            case "$t" in
-                chat:*|user:*) echo "$t" ;;
-                *) echo "user:$t" ;;
-            esac
-            ;;
-        *)
-            echo "$t"
-            ;;
-    esac
-}
-
-send_identity_welcome_message_menu() {
-    local channel="$1"
-    local target="$2"
-    local message="$3"
-    local normalized_target output rc
-
-    normalized_target="$(normalize_welcome_target_for_channel_menu "$channel" "$target" || true)"
-    if [ -z "$normalized_target" ]; then
-        log_error "欢迎消息目标无效"
-        return 1
-    fi
-
-    set +e
-    output="$(openclaw message send --channel "$channel" --target "$normalized_target" --message "$message" --json 2>&1)"
-    rc=$?
-    set -e
-    if [ $rc -ne 0 ] || echo "$output" | grep -q '"ok"[[:space:]]*:[[:space:]]*false' || echo "$output" | grep -qiE "error|unknown target|failed"; then
-        log_error "欢迎消息发送失败"
-        echo "$output" | head -8 | sed 's/^/  /'
-        return 1
-    fi
-
-    log_info "欢迎消息发送成功（${channel} -> ${normalized_target}）"
-    return 0
 }
 
 config_identity() {
@@ -6007,7 +5941,7 @@ config_identity() {
     print_divider
     echo ""
 
-    local current_name current_user current_region current_timezone current_goal current_personality current_work_style current_welcome_channel current_welcome_target
+    local current_name current_user current_region current_timezone current_goal current_personality current_work_style current_welcome_message
     current_name="$(openclaw config get identity.name 2>/dev/null || true)"
     current_user="$(openclaw config get identity.user_name 2>/dev/null || true)"
     current_region="$(openclaw config get identity.region 2>/dev/null || true)"
@@ -6015,20 +5949,18 @@ config_identity() {
     current_goal="$(openclaw config get identity.goal 2>/dev/null || true)"
     current_personality="$(openclaw config get identity.personality 2>/dev/null || true)"
     current_work_style="$(openclaw config get identity.work_style 2>/dev/null || true)"
-    current_welcome_channel="$(openclaw config get identity.welcome.channel 2>/dev/null || true)"
-    current_welcome_target="$(openclaw config get identity.welcome.target 2>/dev/null || true)"
+    current_welcome_message="$(openclaw config get identity.welcome.message 2>/dev/null || true)"
 
     current_name="${current_name:-Clawd}"
     current_user="${current_user:-主人}"
     current_region="${current_region:-中国大陆}"
     current_timezone="${current_timezone:-Asia/Shanghai}"
-    current_goal="${current_goal:-帮助我处理日常任务、信息检索与自动化执行}"
-    current_personality="${current_personality:-专业、直接、可靠}"
-    current_work_style="${current_work_style:-先澄清需求，再分步骤执行，关键节点主动反馈}"
-    current_welcome_channel="${current_welcome_channel:-}"
-    current_welcome_target="${current_welcome_target:-}"
+    current_goal="${current_goal:-综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等}"
+    current_personality="${current_personality:-严谨、适当幽默、务实}"
+    current_work_style="${current_work_style:-整段回复，主动汇报，积极响应并调用skills}"
+    current_welcome_message="${current_welcome_message:-你好我的主人，我是你的龙虾小助理，现在我已经上线了。现在你可以通过简单设置与飞书/钉钉/tele等进行配对，你就可以在通讯平台中给我布置任务啦！具体参照页面下方的配对指南}"
 
-    local bot_name user_name region timezone user_goal personality work_style greeting profile_doc welcome_channel welcome_target welcome_message
+    local bot_name user_name region timezone user_goal personality work_style greeting profile_doc welcome_message welcome_doc
     read_input "${YELLOW}助手名称 (默认: ${current_name}): ${NC}" bot_name
     bot_name="${bot_name:-$current_name}"
     read_input "${YELLOW}如何称呼你 (默认: ${current_user}): ${NC}" user_name
@@ -6044,13 +5976,11 @@ config_identity() {
     read_input "${YELLOW}你希望机器人的工作方式: ${NC}" work_style
     work_style="${work_style:-$current_work_style}"
     echo ""
-    read_input "${YELLOW}欢迎消息渠道（可选，留空自动探测）: ${NC}" welcome_channel
-    welcome_channel="${welcome_channel:-$current_welcome_channel}"
-    read_input "${YELLOW}欢迎消息目标（可选，如 chat:xxx/user:xxx/+8613...）: ${NC}" welcome_target
-    welcome_target="${welcome_target:-$current_welcome_target}"
+    read_input "${YELLOW}欢迎消息（留空使用默认）: ${NC}" welcome_message
+    welcome_message="${welcome_message:-$current_welcome_message}"
 
-    greeting="你好 ${user_name}，我是 ${bot_name}。我会按照“${work_style}”的方式为你服务。"
-    welcome_message="$(build_identity_welcome_message_menu "$bot_name" "$user_name" "$region" "$timezone" "$user_goal" "$personality" "$work_style")"
+    greeting="$welcome_message"
+    welcome_doc="$(build_identity_welcome_message_menu "$welcome_message")"
 
     openclaw config set identity.name "$bot_name" 2>/dev/null || true
     openclaw config set identity.user_name "$user_name" 2>/dev/null || true
@@ -6060,12 +5990,14 @@ config_identity() {
     openclaw config set identity.personality "$personality" 2>/dev/null || true
     openclaw config set identity.work_style "$work_style" 2>/dev/null || true
     openclaw config set identity.greeting "$greeting" 2>/dev/null || true
-    openclaw config set identity.welcome.channel "$welcome_channel" 2>/dev/null || true
-    openclaw config set identity.welcome.target "$welcome_target" 2>/dev/null || true
+    openclaw config set identity.welcome.message "$welcome_message" 2>/dev/null || true
+    openclaw config unset identity.welcome.channel 2>/dev/null || true
+    openclaw config unset identity.welcome.target 2>/dev/null || true
     openclaw config set "boot-md.enabled" true 2>/dev/null || true
     openclaw config set "session-memory.enabled" true 2>/dev/null || true
-    upsert_env_export "OPENCLAW_WELCOME_CHANNEL" "$welcome_channel"
-    upsert_env_export "OPENCLAW_WELCOME_TARGET" "$welcome_target"
+    upsert_env_export "OPENCLAW_WELCOME_MESSAGE" "$welcome_message"
+    remove_env_export "OPENCLAW_WELCOME_CHANNEL"
+    remove_env_export "OPENCLAW_WELCOME_TARGET"
 
     profile_doc="$CONFIG_DIR/docs/assistant-base-profile.md"
     mkdir -p "$CONFIG_DIR/docs" 2>/dev/null || true
@@ -6090,9 +6022,10 @@ ${greeting}
   - ${WELCOME_DOC_URL_GITEE}
   - ${WELCOME_DOC_URL_GITHUB}
 
-## 启动后自动欢迎发送
-- 渠道: ${welcome_channel:-自动探测}
-- 目标: ${welcome_target:-自动探测（优先使用 allowFrom）}
+## 欢迎消息说明
+- 类型: 通用欢迎语（不区分消息渠道）
+- 文案:
+${welcome_doc}
 EOF
     chmod 600 "$profile_doc" 2>/dev/null || true
 
@@ -6100,12 +6033,6 @@ EOF
     log_info "身份配置已更新！"
     echo -e "  ${CYAN}首次欢迎语:${NC} ${WHITE}${greeting}${NC}"
     echo -e "  ${CYAN}已写入:${NC} ${WHITE}${profile_doc}${NC}"
-    if [ -n "$welcome_channel" ] && [ -n "$welcome_target" ]; then
-        echo ""
-        if confirm "是否立即发送欢迎消息验证配置？" "y"; then
-            send_identity_welcome_message_menu "$welcome_channel" "$welcome_target" "$welcome_message" || true
-        fi
-    fi
     
     press_enter
 }
