@@ -17,12 +17,15 @@
 
 2. Skills 档位安装
 - LOW：轻量能力集（`find-skills`、`shell`、`summarize`、`web-search`、`url-to-markdown`）
-- MEDIUM：增强能力集（自动化、反思、MCP、文档与表格能力等）
-- HIGH：安装 `skills/default` 下全部默认技能包
+- MEDIUM：增强能力集（自动化、反思、MCP、文档与表格能力等，含 `gemini-image-service`、`nano-banana-service`）
+- HIGH：安装 `skills/default` 下全部默认技能包（含 `grok-imagine-1.0-video`）
 
 3. API 参数
 - 按档位引导配置：`Gemini`（`GOOGLE_API_KEY`）、`BraveSearch`（`BRAVE_API_KEY`）、`NanoBanana`（`NANO_BANANA_API_KEY`）
 - 同时写入兼容别名：`GEMINI_API_KEY`、`BRAVESEARCH_API_KEY`、`NANOBANANA_API_KEY`
+- 同时支持第三方服务参数：
+  - `GEMINI_BASE_URL` / `GEMINI_IMAGE_MODEL`
+  - `NANO_BANANA_BASE_URL` / `NANO_BANANA_IMAGE_MODEL` / `NANO_BANANA_VIDEO_MODEL`
 
 4. 模型参数
 - LOW：`google/gemini-3.1-flash-lite-preview` + `google/gemini-3-flash-preview`

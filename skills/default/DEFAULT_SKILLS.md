@@ -38,3 +38,6 @@ Bundled skills:
 - stock-monitor-skill
 - multi-search-engine
 - akshare-stock
+- gemini-image-service
+- nano-banana-service
+- grok-imagine-1.0-video

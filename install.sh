@@ -97,8 +97,15 @@ RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 RULE_PROFILE_SELECTED="$(echo "${RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]')"
 
 PROFILE_LOW_SKILLS="find-skills shell summarize web-search url-to-markdown"
-PROFILE_MEDIUM_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock"
+PROFILE_MEDIUM_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 PROFILE_HIGH_SKILLS="__ALL_DEFAULT__"
+GEMINI_BASE_URL_DEFAULT="${GEMINI_BASE_URL:-${GOOGLE_BASE_URL:-}}"
+GEMINI_IMAGE_MODEL_DEFAULT="${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image-preview}"
+NANO_BANANA_BASE_URL_DEFAULT="${NANO_BANANA_BASE_URL:-}"
+NANO_BANANA_IMAGE_MODEL_DEFAULT="${NANO_BANANA_IMAGE_MODEL:-nano-banana-pro-image}"
+NANO_BANANA_VIDEO_MODEL_DEFAULT="${NANO_BANANA_VIDEO_MODEL:-nano-banana-pro-video}"
+WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
+WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
 
 NO_ONBOARD="${OPENCLAW_NO_ONBOARD:-0}"
 NO_PROMPT="${OPENCLAW_NO_PROMPT:-0}"
@@ -315,6 +322,13 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_SWAP_FILE=</swapfile.openclaw>
   OPENCLAW_SKILLS_FORCE_UPDATE=0|1
   OPENCLAW_RULE_PROFILE=low|medium|high
+  GEMINI_BASE_URL=<third_party_gemini_url>
+  GEMINI_IMAGE_MODEL=<gemini_image_model>
+  NANO_BANANA_BASE_URL=<third_party_nano_url>
+  NANO_BANANA_IMAGE_MODEL=<nano_image_model>
+  NANO_BANANA_VIDEO_MODEL=<nano_video_model>
+  OPENCLAW_WELCOME_CHANNEL=<feishu|telegram|...>
+  OPENCLAW_WELCOME_TARGET=<chat:xxx|user:xxx|+8613...>
 EOF
 }
 
@@ -655,6 +669,82 @@ prompt_profile_api_key() {
     export "$key_var=$value"
 }
 
+prompt_profile_text_config() {
+    local var_name="$1"
+    local display_name="$2"
+    local default_value="$3"
+    local current="${!var_name:-$default_value}"
+    local value="$current"
+
+    if [ "$NO_PROMPT" = "1" ] || [ "$TTY_INPUT" = "/dev/null" ]; then
+        export "$var_name=$value"
+        return 0
+    fi
+
+    read_input "${YELLOW}${display_name} (默认: ${current}): ${NC}" value
+    value="${value:-$current}"
+    export "$var_name=$value"
+}
+
+apply_generative_service_settings() {
+    local gemini_key="${GOOGLE_API_KEY:-}"
+    local gemini_url="${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}"
+    local gemini_model="${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}"
+    local nano_key="${NANO_BANANA_API_KEY:-}"
+    local nano_url="${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT}"
+    local nano_image_model="${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}"
+    local nano_video_model="${NANO_BANANA_VIDEO_MODEL:-$NANO_BANANA_VIDEO_MODEL_DEFAULT}"
+
+    upsert_env_export_install "GEMINI_BASE_URL" "$gemini_url"
+    upsert_env_export_install "GEMINI_IMAGE_MODEL" "$gemini_model"
+    upsert_env_export_install "NANO_BANANA_BASE_URL" "$nano_url"
+    upsert_env_export_install "NANO_BANANA_IMAGE_MODEL" "$nano_image_model"
+    upsert_env_export_install "NANO_BANANA_VIDEO_MODEL" "$nano_video_model"
+    upsert_env_export_install "OPENCLAW_GEMINI_BASE_URL" "$gemini_url"
+    upsert_env_export_install "OPENCLAW_GEMINI_IMAGE_MODEL" "$gemini_model"
+    upsert_env_export_install "OPENCLAW_NANO_BANANA_BASE_URL" "$nano_url"
+    upsert_env_export_install "OPENCLAW_NANO_BANANA_IMAGE_MODEL" "$nano_image_model"
+    upsert_env_export_install "OPENCLAW_NANO_BANANA_VIDEO_MODEL" "$nano_video_model"
+
+    if check_command openclaw; then
+        openclaw config set "vendor.media.gemini.apiKey" "$gemini_key" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.gemini.baseUrl" "$gemini_url" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.gemini.imageModel" "$gemini_model" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.nanobanana.apiKey" "$nano_key" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.nanobanana.baseUrl" "$nano_url" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.nanobanana.imageModel" "$nano_image_model" >/dev/null 2>&1 || true
+        openclaw config set "vendor.media.nanobanana.videoModel" "$nano_video_model" >/dev/null 2>&1 || true
+
+        # 兼容官方插件配置路径（若插件支持将自动生效）
+        openclaw config set "plugins.entries.gemini.config.apiKey" "$gemini_key" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.gemini.config.baseUrl" "$gemini_url" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.gemini.config.model" "$gemini_model" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.nano-banana-pro.config.apiKey" "$nano_key" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.nano-banana-pro.config.baseUrl" "$nano_url" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.nano-banana-pro.config.imageModel" "$nano_image_model" >/dev/null 2>&1 || true
+        openclaw config set "plugins.entries.nano-banana-pro.config.videoModel" "$nano_video_model" >/dev/null 2>&1 || true
+    fi
+
+    local skills_root="$CONFIG_DIR/skills"
+    local gemini_skill_cfg="$skills_root/gemini-image-service/service.env"
+    local nano_skill_cfg="$skills_root/nano-banana-service/service.env"
+    mkdir -p "$(dirname "$gemini_skill_cfg")" "$(dirname "$nano_skill_cfg")" 2>/dev/null || true
+
+    cat > "$gemini_skill_cfg" <<EOF
+GEMINI_API_KEY=${gemini_key}
+GEMINI_BASE_URL=${gemini_url}
+GEMINI_IMAGE_MODEL=${gemini_model}
+EOF
+
+    cat > "$nano_skill_cfg" <<EOF
+NANO_BANANA_API_KEY=${nano_key}
+NANO_BANANA_BASE_URL=${nano_url}
+NANO_BANANA_IMAGE_MODEL=${nano_image_model}
+NANO_BANANA_VIDEO_MODEL=${nano_video_model}
+EOF
+    chmod 600 "$gemini_skill_cfg" "$nano_skill_cfg" 2>/dev/null || true
+}
+
 configure_profile_api_keys() {
     local level
     level="$(normalize_rule_profile_level "$1")"
@@ -706,6 +796,16 @@ configure_profile_api_keys() {
         remove_env_export_install "NANO_BANANA_API_KEY"
         remove_env_export_install "NANOBANANA_API_KEY"
     fi
+
+    echo ""
+    log_step "配置 Gemini/NanoBanana 第三方服务参数（URL + 模型）..."
+    prompt_profile_text_config "GEMINI_BASE_URL" "Gemini 服务 URL" "$GEMINI_BASE_URL_DEFAULT"
+    prompt_profile_text_config "GEMINI_IMAGE_MODEL" "Gemini 图片模型名" "$GEMINI_IMAGE_MODEL_DEFAULT"
+    prompt_profile_text_config "NANO_BANANA_BASE_URL" "NanoBanana 服务 URL" "$NANO_BANANA_BASE_URL_DEFAULT"
+    prompt_profile_text_config "NANO_BANANA_IMAGE_MODEL" "NanoBanana 图片模型名" "$NANO_BANANA_IMAGE_MODEL_DEFAULT"
+    prompt_profile_text_config "NANO_BANANA_VIDEO_MODEL" "NanoBanana 视频模型名" "$NANO_BANANA_VIDEO_MODEL_DEFAULT"
+
+    apply_generative_service_settings
 }
 
 apply_profile_model_policy() {
@@ -821,6 +921,7 @@ write_profile_policy_files() {
     local pair primary_model small_model
     local prompt_text
     local now_iso
+    local gemini_url gemini_model nano_url nano_image_model nano_video_model
 
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
@@ -831,6 +932,11 @@ write_profile_policy_files() {
     pair="$(get_profile_model_pair "$level")"
     primary_model="${pair%% *}"
     small_model="${pair#* }"
+    gemini_url="${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}"
+    gemini_model="${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}"
+    nano_url="${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT}"
+    nano_image_model="${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}"
+    nano_video_model="${NANO_BANANA_VIDEO_MODEL:-$NANO_BANANA_VIDEO_MODEL_DEFAULT}"
     prompt_text="$(get_profile_prompt_text "$level")"
     now_iso="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
@@ -905,6 +1011,17 @@ EOF
     "primary": "${primary_model}",
     "small": "${small_model}"
   },
+  "mediaServices": {
+    "gemini": {
+      "baseUrl": "${gemini_url}",
+      "imageModel": "${gemini_model}"
+    },
+    "nanobanana": {
+      "baseUrl": "${nano_url}",
+      "imageModel": "${nano_image_model}",
+      "videoModel": "${nano_video_model}"
+    }
+  },
   "files": {
     "soul": "${soul_rule_file}",
     "agent": "${system_rule_file}",
@@ -978,6 +1095,8 @@ apply_vendor_rule_profile() {
     echo -e "  档位: ${WHITE}${level}${NC}"
     echo -e "  限流: ${WHITE}$(echo "$limits" | awk '{print $1"小时/"$2"次, 总Token="$3", 单次="$4}')${NC}"
     echo -e "  模型: ${WHITE}${pair}${NC}"
+    echo -e "  Gemini 服务: ${WHITE}${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT} | ${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}${NC}"
+    echo -e "  NanoBanana 服务: ${WHITE}${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT} | ${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  提示词摘要: ${WHITE}$(echo "$prompt_text" | head -1)${NC}"
 }
 
@@ -1854,10 +1973,6 @@ install_channel_assets() {
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local local_doc="$script_dir/docs/channels-configuration-guide.md"
     local local_skill="$script_dir/skills/channel-setup-assistant/SKILL.md"
-    local bundled_skills_dir=""
-    local skills_force_update="${OPENCLAW_SKILLS_FORCE_UPDATE:-0}"
-    local copied_count=0
-    local kept_count=0
 
     mkdir -p "$skill_dir" "$skills_root" "$docs_dir" 2>/dev/null || true
 
@@ -1917,31 +2032,7 @@ EOF
 EOF
     fi
 
-    # 默认技能包注入（可通过 OPENCLAW_SKILLS_FORCE_UPDATE=1 强制覆盖）
-    bundled_skills_dir="$(resolve_install_skills_bundle_dir || true)"
-    if [ -n "$bundled_skills_dir" ] && [ -d "$bundled_skills_dir" ]; then
-        local bundled_src
-        for bundled_src in "$bundled_skills_dir"/*; do
-            [ -d "$bundled_src" ] || continue
-            local skill_name
-            local skill_target
-            skill_name="$(basename "$bundled_src")"
-            skill_target="$skills_root/$skill_name"
-
-            if [ -d "$skill_target" ] && [ "$skills_force_update" != "1" ]; then
-                kept_count=$((kept_count + 1))
-                continue
-            fi
-
-            rm -rf "$skill_target" 2>/dev/null || true
-            if cp -a "$bundled_src" "$skill_target" 2>/dev/null; then
-                copied_count=$((copied_count + 1))
-            fi
-        done
-        log_info "默认技能包已处理: 新增/更新 ${copied_count} 个，保留 ${kept_count} 个（已存在）"
-    else
-        log_warn "未找到默认技能包目录，已跳过（后续可在配置菜单中重新同步）"
-    fi
+    log_info "默认技能包将按规则档位注入（低/中/高），此步骤仅注入渠道文档与渠道助手 Skill。"
 
     chmod 644 "$skill_file" "$doc_file" 2>/dev/null || true
     log_info "已注入渠道配置文档与 Skill:"
@@ -3287,17 +3378,10 @@ setup_identity() {
     local user_goal="${OPENCLAW_USER_GOAL:-帮助我处理日常任务、信息检索与自动化执行}"
     local personality="${OPENCLAW_ASSISTANT_PERSONALITY:-专业、直接、可靠}"
     local work_style="${OPENCLAW_ASSISTANT_WORK_STYLE:-先澄清需求，再分步骤执行，关键节点主动反馈}"
+    local welcome_channel="${OPENCLAW_WELCOME_CHANNEL:-}"
+    local welcome_target="${OPENCLAW_WELCOME_TARGET:-}"
     local welcome_text=""
     local profile_doc="$CONFIG_DIR/docs/assistant-base-profile.md"
-
-    echo -e "${WHITE}首次欢迎语（示例）:${NC}"
-    echo "  你好，我是 ${bot_name}，你的 OpenClaw 智能助手。"
-    echo "  我可以协助你完成信息检索、自动化任务执行、文档处理与渠道消息响应。"
-    echo "  渠道配置入口：bash ~/.openclaw/config-menu.sh（主菜单 3/4）"
-    echo "  渠道文档："
-    echo "    - https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
-    echo "    - https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
-    echo ""
 
     if [ "$NO_PROMPT" != "1" ] && [ "$TTY_INPUT" != "/dev/null" ]; then
         read_input "${YELLOW}助手名称 (默认: ${bot_name}): ${NC}" bot_name
@@ -3314,9 +3398,15 @@ setup_identity() {
         personality="${personality:-${OPENCLAW_ASSISTANT_PERSONALITY:-专业、直接、可靠}}"
         read_input "${YELLOW}你希望机器人的工作方式: ${NC}" work_style
         work_style="${work_style:-${OPENCLAW_ASSISTANT_WORK_STYLE:-先澄清需求，再分步骤执行，关键节点主动反馈}}"
+        echo ""
+        echo -e "${CYAN}欢迎消息发送配置（Gateway 启动后自动发送）${NC}"
+        read_input "${YELLOW}欢迎消息渠道（可选，留空自动探测）: ${NC}" welcome_channel
+        read_input "${YELLOW}欢迎消息目标（可选，如 chat:xxx/user:xxx/+8613...）: ${NC}" welcome_target
     fi
 
     welcome_text="你好 ${user_name}，我是 ${bot_name}。我会按照“${work_style}”的方式为你服务。"
+    upsert_env_export_install "OPENCLAW_WELCOME_CHANNEL" "$welcome_channel"
+    upsert_env_export_install "OPENCLAW_WELCOME_TARGET" "$welcome_target"
 
     if check_command openclaw; then
         openclaw config set identity.name "$bot_name" >/dev/null 2>&1 || true
@@ -3327,6 +3417,8 @@ setup_identity() {
         openclaw config set identity.personality "$personality" >/dev/null 2>&1 || true
         openclaw config set identity.work_style "$work_style" >/dev/null 2>&1 || true
         openclaw config set identity.greeting "$welcome_text" >/dev/null 2>&1 || true
+        openclaw config set identity.welcome.channel "$welcome_channel" >/dev/null 2>&1 || true
+        openclaw config set identity.welcome.target "$welcome_target" >/dev/null 2>&1 || true
         # 使首次会话时更容易读取到该人设
         openclaw config set "boot-md.enabled" true >/dev/null 2>&1 || true
         openclaw config set "session-memory.enabled" true >/dev/null 2>&1 || true
@@ -3351,8 +3443,12 @@ ${welcome_text}
 - 命令: \`bash ~/.openclaw/config-menu.sh\`
 - 主菜单: 3 官方消息渠道插件 / 4 非官方消息渠道配置
 - 文档:
-  - https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md
-  - https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md
+  - ${WELCOME_DOC_URL_GITEE}
+  - ${WELCOME_DOC_URL_GITHUB}
+
+## 启动后自动欢迎发送
+- 渠道: ${welcome_channel:-自动探测}
+- 目标: ${welcome_target:-自动探测（优先使用 allowFrom）}
 EOF
     chmod 600 "$profile_doc" 2>/dev/null || true
 
@@ -3362,6 +3458,169 @@ EOF
     echo -e "  用户称呼: ${WHITE}$user_name${NC}"
     echo -e "  时区: ${WHITE}$timezone${NC}"
     echo -e "  人设文档: ${WHITE}$profile_doc${NC}"
+}
+
+build_post_install_welcome_message() {
+    local bot_name user_name region timezone user_goal personality work_style
+    bot_name="$(openclaw config get identity.name 2>/dev/null || echo "Clawd")"
+    user_name="$(openclaw config get identity.user_name 2>/dev/null || echo "朋友")"
+    region="$(openclaw config get identity.region 2>/dev/null || echo "中国大陆")"
+    timezone="$(openclaw config get identity.timezone 2>/dev/null || echo "Asia/Shanghai")"
+    user_goal="$(openclaw config get identity.goal 2>/dev/null || echo "协助完成信息检索与自动化任务")"
+    personality="$(openclaw config get identity.personality 2>/dev/null || echo "专业、直接、可靠")"
+    work_style="$(openclaw config get identity.work_style 2>/dev/null || echo "先澄清需求，再分步骤执行")"
+
+    cat <<EOF
+你好 ${user_name}，我是 ${bot_name}，已完成启动与默认配置。
+
+我可以协助你：
+1) 信息检索与摘要
+2) 自动化任务执行
+3) 文档与表格处理
+4) 多消息渠道联动
+
+渠道配置入口：
+- bash ~/.openclaw/config-menu.sh（主菜单 3/4）
+- ${WELCOME_DOC_URL_GITEE}
+- ${WELCOME_DOC_URL_GITHUB}
+
+当前人设与工作方式：
+- 地区/时区：${region} / ${timezone}
+- 目标：${user_goal}
+- 性格：${personality}
+- 工作方式：${work_style}
+
+你可以先告诉我：你希望我今天先完成哪一件事。
+EOF
+}
+
+normalize_welcome_target_for_channel() {
+    local channel="$1"
+    local target="$2"
+    local t
+    t="$(echo "$target" | tr -d '[:space:]')"
+    [ -z "$t" ] && return 1
+    [ "$t" = "*" ] && return 1
+
+    case "$channel" in
+        feishu)
+            case "$t" in
+                chat:*|user:*)
+                    echo "$t"
+                    ;;
+                *)
+                    echo "user:$t"
+                    ;;
+            esac
+            ;;
+        *)
+            echo "$t"
+            ;;
+    esac
+}
+
+get_first_allow_from_target() {
+    local channel="$1"
+    local raw first
+
+    raw="$(openclaw config get "channels.${channel}.allowFrom" 2>/dev/null || true)"
+    if [ -z "$raw" ] || [ "$raw" = "undefined" ] || [ "$raw" = "null" ]; then
+        raw="$(openclaw config get "channels.${channel}.accounts.main.allowFrom" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$raw" ] || [ "$raw" = "undefined" ] || [ "$raw" = "null" ]; then
+        return 1
+    fi
+
+    if echo "$raw" | grep -q '^\['; then
+        if check_command jq; then
+            first="$(echo "$raw" | jq -r '.[0] // empty' 2>/dev/null || true)"
+        else
+            first="$(echo "$raw" | sed -E 's/^\[\s*"([^"]+)".*$/\1/')"
+        fi
+    else
+        first="$(echo "$raw" | sed -E 's/^\s*"?([^",\]]+).*/\1/')"
+    fi
+
+    normalize_welcome_target_for_channel "$channel" "$first"
+}
+
+send_welcome_message_once() {
+    local channel="$1"
+    local target="$2"
+    local message="$3"
+    local output=""
+
+    set +e
+    output="$(openclaw message send --channel "$channel" --target "$target" --message "$message" --json 2>&1)"
+    local rc=$?
+    set -e
+
+    if [ $rc -ne 0 ]; then
+        return 1
+    fi
+    if echo "$output" | grep -q '"ok"[[:space:]]*:[[:space:]]*false'; then
+        return 1
+    fi
+    if echo "$output" | grep -qiE "error|unknown target|failed"; then
+        return 1
+    fi
+    return 0
+}
+
+send_post_install_welcome_message() {
+    if ! check_command openclaw; then
+        return 0
+    fi
+
+    local welcome_message
+    welcome_message="$(build_post_install_welcome_message)"
+    mkdir -p "$CONFIG_DIR/docs" 2>/dev/null || true
+    cat > "$CONFIG_DIR/docs/startup-welcome-message.md" <<EOF
+${welcome_message}
+EOF
+    chmod 600 "$CONFIG_DIR/docs/startup-welcome-message.md" 2>/dev/null || true
+
+    local configured_channel configured_target normalized_target
+    configured_channel="$(openclaw config get identity.welcome.channel 2>/dev/null || true)"
+    configured_target="$(openclaw config get identity.welcome.target 2>/dev/null || true)"
+    configured_channel="$(echo "$configured_channel" | tr -d '[:space:]')"
+    configured_target="$(echo "$configured_target" | tr -d '[:space:]')"
+
+    if [ -n "$configured_channel" ] && [ -n "$configured_target" ]; then
+        normalized_target="$(normalize_welcome_target_for_channel "$configured_channel" "$configured_target" || true)"
+        if [ -n "$normalized_target" ] && send_welcome_message_once "$configured_channel" "$normalized_target" "$welcome_message"; then
+            log_info "欢迎语已自动发送（${configured_channel} -> ${normalized_target}）"
+            return 0
+        fi
+        log_warn "欢迎语发送失败（配置目标不可达），将尝试自动探测 allowFrom。"
+    fi
+
+    local channels_json channel target
+    channels_json="$(openclaw channels list --json 2>/dev/null | awk 'BEGIN{p=0} /^\{/ {p=1} {if(p) print}')"
+    if [ -z "$channels_json" ]; then
+        log_warn "未获取到渠道列表，欢迎语仅保存到本地文档。"
+        return 1
+    fi
+
+    if ! check_command jq; then
+        log_warn "系统无 jq，无法自动解析渠道目标，欢迎语仅保存到本地文档。"
+        return 1
+    fi
+
+    while IFS= read -r channel; do
+        [ -n "$channel" ] || continue
+        target="$(get_first_allow_from_target "$channel" || true)"
+        [ -n "$target" ] || continue
+        if send_welcome_message_once "$channel" "$target" "$welcome_message"; then
+            log_info "欢迎语已自动发送（${channel} -> ${target}）"
+            return 0
+        fi
+    done < <(echo "$channels_json" | jq -r '.chat | keys[]?' 2>/dev/null)
+
+    log_warn "未找到可用发送目标，欢迎语已写入: $CONFIG_DIR/docs/startup-welcome-message.md"
+    log_warn "可手动发送：openclaw message send --channel <渠道> --target <目标> --message \"$(echo "$welcome_message" | head -1)\""
+    return 1
 }
 
 
@@ -3549,6 +3808,7 @@ start_openclaw_service() {
         echo -e "  ${CYAN}停止服务:${NC} openclaw gateway stop"
         echo ""
         log_info "OpenClaw 现在可以接收消息了！"
+        send_post_install_welcome_message || true
     else
         log_error "Gateway 启动失败"
         echo -e "${YELLOW}排查命令:${NC} openclaw gateway status && openclaw doctor --fix"
