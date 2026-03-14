@@ -1829,6 +1829,14 @@ https://mirror.ghproxy.com/https://github.com/${GITHUB_REPO}.git
 EOF
 }
 
+refresh_cached_installer_repo() {
+    local cache_repo="$1"
+    [ -d "$cache_repo/.git" ] || return 1
+    git -C "$cache_repo" fetch --depth 1 origin main >/dev/null 2>&1 || return 1
+    git -C "$cache_repo" reset --hard FETCH_HEAD >/dev/null 2>&1 || return 1
+    return 0
+}
+
 resolve_install_skills_bundle_dir() {
     local script_dir
     local local_bundle
@@ -1851,6 +1859,9 @@ resolve_install_skills_bundle_dir() {
     mkdir -p "$cache_root" 2>/dev/null || true
 
     if [ -d "$cache_bundle" ]; then
+        if check_command git && [ "${OPENCLAW_REFRESH_SKILLS_CACHE:-1}" = "1" ]; then
+            refresh_cached_installer_repo "$cache_repo" >/dev/null 2>&1 || true
+        fi
         echo "$cache_bundle"
         return 0
     fi
@@ -3617,6 +3628,26 @@ cleanup_legacy_gateway_runtime() {
     fi
 }
 
+enforce_gateway_service_precedence() {
+    if ! check_command systemctl; then
+        return 0
+    fi
+
+    local has_gateway_service=0
+    if systemctl list-unit-files 2>/dev/null | grep -q '^openclaw-gateway\.service'; then
+        has_gateway_service=1
+    elif systemctl status openclaw-gateway.service >/dev/null 2>&1; then
+        has_gateway_service=1
+    fi
+
+    if [ "$has_gateway_service" -eq 1 ]; then
+        run_as_root systemctl disable --now openclaw.service >/dev/null 2>&1 || true
+        run_as_root systemctl mask openclaw.service >/dev/null 2>&1 || true
+        run_as_root systemctl daemon-reload >/dev/null 2>&1 || true
+        log_info "已收敛服务：保留 openclaw-gateway.service，禁用并屏蔽 openclaw.service"
+    fi
+}
+
 install_official_gateway_service() {
     local log_file
     log_file="$(mktemp /tmp/openclaw-gateway-install.XXXXXX.log)"
@@ -3666,6 +3697,8 @@ converge_gateway_single_instance() {
     if ! install_official_gateway_service; then
         return 1
     fi
+
+    enforce_gateway_service_precedence
 
     if [ "$mode" = "install-only" ]; then
         log_info "Gateway 单实例服务收敛完成（未启动）"

@@ -1195,6 +1195,26 @@ cleanup_legacy_gateway_runtime_menu() {
     fi
 }
 
+enforce_gateway_service_precedence_menu() {
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local has_gateway_service=0
+    if systemctl list-unit-files 2>/dev/null | grep -q '^openclaw-gateway\.service'; then
+        has_gateway_service=1
+    elif systemctl status openclaw-gateway.service >/dev/null 2>&1; then
+        has_gateway_service=1
+    fi
+
+    if [ "$has_gateway_service" -eq 1 ]; then
+        run_with_optional_sudo systemctl disable --now openclaw.service >/dev/null 2>&1 || true
+        run_with_optional_sudo systemctl mask openclaw.service >/dev/null 2>&1 || true
+        run_with_optional_sudo systemctl daemon-reload >/dev/null 2>&1 || true
+        log_info "已收敛服务：保留 openclaw-gateway.service，禁用并屏蔽 openclaw.service"
+    fi
+}
+
 install_official_gateway_service_menu() {
     local gateway_port="$1"
     local log_file
@@ -1242,6 +1262,8 @@ converge_gateway_single_instance_menu() {
     if ! install_official_gateway_service_menu "$gateway_port"; then
         return 1
     fi
+
+    enforce_gateway_service_precedence_menu
 
     restart_output="$(openclaw gateway restart 2>&1)" || true
     sleep 2
@@ -6232,6 +6254,14 @@ https://mirror.ghproxy.com/https://github.com/${INSTALLER_REPO}.git
 EOF
 }
 
+refresh_cached_installer_repo_menu() {
+    local cache_repo="$1"
+    [ -d "$cache_repo/.git" ] || return 1
+    git -C "$cache_repo" fetch --depth 1 origin main >/dev/null 2>&1 || return 1
+    git -C "$cache_repo" reset --hard FETCH_HEAD >/dev/null 2>&1 || return 1
+    return 0
+}
+
 resolve_default_skills_bundle_dir() {
     local script_dir
     local bundle_dir
@@ -6254,6 +6284,9 @@ resolve_default_skills_bundle_dir() {
     mkdir -p "$cache_root" 2>/dev/null || true
 
     if [ -d "$cache_bundle" ]; then
+        if command -v git >/dev/null 2>&1 && [ "${OPENCLAW_REFRESH_SKILLS_CACHE:-1}" = "1" ]; then
+            refresh_cached_installer_repo_menu "$cache_repo" >/dev/null 2>&1 || true
+        fi
         echo "$cache_bundle"
         return 0
     fi
