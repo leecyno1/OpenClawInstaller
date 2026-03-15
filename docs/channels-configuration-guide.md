@@ -11,14 +11,15 @@
    - `openclaw doctor --fix`
    - `openclaw gateway restart`
    - `openclaw channels list`
+4. 如需追踪插件与 skills 上游来源，查看：`docs/upstream-sources.md`
 
 ## 2. 渠道总览
 
 | 菜单项 | 渠道 | 插件来源 | 插件包 |
 |---|---|---|---|
 | 1 | Telegram | 官方 | 内置 |
-| 2 | Discord | 官方 | 内置 |
-| 3 | WhatsApp | 官方 | 内置 |
+| 2 | Discord | 官方 | `@openclaw/discord` |
+| 3 | WhatsApp | 官方 | `@openclaw/whatsapp` |
 | 4 | Slack | 官方 | 内置 |
 | 5 | 飞书 Feishu | 官方 | `@openclaw/feishu` |
 | 6 | Signal | 官方 | `@openclaw/signal` |
@@ -102,6 +103,11 @@
   - `callbackAesKey`
   - `webhookPath`（默认 `/wecom/app`）
 - 菜单路径：`[3]消息渠道 -> [18]企业微信（社区）`
+
+### 非官方高级模型（Claude/GPT）与自动路由
+- 高级模型入口：`[4]非官方消息渠道配置 -> [8]非官方渠道高级模型（Claude/GPT）`
+- 自动路由入口：`[4]非官方消息渠道配置 -> [9]模型自动切换路由`
+- 推荐策略：`auto`（复杂任务走高级模型，失败自动回退硅基流动兜底）
 
 ## 5. 常用排障命令
 

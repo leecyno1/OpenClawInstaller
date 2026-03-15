@@ -11,9 +11,9 @@
 ## 注入项
 
 1. 请求频率与预算管理
-- LOW（基础档）：5 小时最多 50 次，请求总 Token 300000，单次 12000
-- MEDIUM（扩展档）：5 小时最多 160 次，请求总 Token 1200000，单次 24000
-- HIGH（超级档）：5 小时最多 360 次，请求总 Token 3000000，单次 40000
+- LOW（基础档）：5 小时最多 50 次，请求总 Token 600000，单次 24000
+- MEDIUM（扩展档）：5 小时最多 160 次，请求总 Token 2400000，单次 48000
+- HIGH（超级档）：5 小时最多 360 次，请求总 Token 6000000，单次 80000
 
 2. Skills 档位安装
 - LOW -> 基础 skills 包
@@ -65,6 +65,34 @@
 - 只需填写 API Key
 
 该设置写入 `channels.unofficial.fallback.*` 与 `plugins.community.fallback.*`，不会覆盖主模型配置。
+
+## 非官方渠道高级模型（Claude/GPT）
+
+在 `配置菜单 -> 非官方消息渠道配置 -> 非官方渠道高级模型（Claude/GPT）` 中可设置：
+
+- 高级模型类型：`claude` / `gpt`
+- 大模型参数：`url`、`api key`、`model`
+- API 类型：`anthropic` / `openai`（自动随选项设置）
+
+写入路径：
+
+- `channels.unofficial.advanced.*`
+- `plugins.community.advanced.*`
+- 环境变量：`OPENCLAW_UNOFFICIAL_ADVANCED_*`
+
+## 非官方渠道模型自动切换路由
+
+在 `配置菜单 -> 非官方消息渠道配置 -> 模型自动切换路由` 中可设置：
+
+- `auto`：智能分流到高级模型，失败自动回退兜底
+- `advanced_first`：优先高级模型，失败回退兜底
+- `fallback_only`：仅使用兜底模型
+
+写入路径：
+
+- `channels.unofficial.routing.*`
+- `plugins.community.routing.*`
+- 环境变量：`OPENCLAW_UNOFFICIAL_ROUTING_*`
 
 ## 执行入口
 

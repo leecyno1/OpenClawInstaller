@@ -229,6 +229,7 @@ bash ./config-menu.sh
 - `[8]` 高级设置（升级、备份、恢复）
 - `[8]` 高级设置 → `[8]` AI 自动修复 OpenClaw（集成 `auto-fix-openclaw`，支持 Codex/Claude CLI）
 - `[11]` 服务管理 → `[8]` 卸载中心（全局卸载 / 目录卸载保留 skills+plugins / 完全卸载）
+- `[8]` 高级设置 → `[4]` 一键重置（初始化）：清空 API Key、渠道配对与敏感配置（保留 skills/plugins）
 - `[4]` 非官方消息渠道配置 → 微信（LangBot WeChatPad）
 - `[4]` 非官方消息渠道配置 → 企业微信（WeCom）
 - `[4]` 非官方消息渠道配置 → 钉钉（DingTalk）
@@ -321,7 +322,9 @@ export OPENCLAW_SKILLS_FORCE_UPDATE=1
 ## 渠道配置文档
 
 - 仓库文档：`docs/channels-configuration-guide.md`
+- 上游索引：`docs/upstream-sources.md`
 - 安装后本地文档：`~/.openclaw/docs/channels-configuration-guide.md`
+- 安装后本地索引：`~/.openclaw/docs/upstream-sources.md`
 - 安装后 Skill：`~/.openclaw/skills/channel-setup-assistant/SKILL.md`
 
 该文档覆盖官方与社区渠道（含飞书、微信、QQ、企业微信）的字段要求、菜单路径、排障命令与版本策略。
@@ -365,6 +368,13 @@ openclaw plugins update --all
   - 回调地址（Host/Port/Path）
 
 说明：该方案非 OpenClaw 官方渠道，请在生产环境前先做稳定性与安全评估。
+
+## 默认消息插件预装策略
+
+安装完成后会优先从仓库本地包同步以下渠道能力，避免远端安装失败：
+
+- 包安装：`feishu / wechat / dingtalk / qq / discord / whatsapp`
+- 内置启用：`telegram / imessage`（随 core 版本能力）
 
 ---
 

@@ -92,7 +92,8 @@ SWAP_THRESHOLD_MB="${OPENCLAW_SWAP_THRESHOLD_MB:-4096}"
 SWAP_TARGET_MB="${OPENCLAW_SWAP_TARGET_MB:-0}"
 SWAP_FILE_BASE="${OPENCLAW_SWAP_FILE:-/swapfile.openclaw}"
 AUTO_FIX_ATTEMPTED=0
-DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
+DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/discord @openclaw/whatsapp openclaw-wechat-channel @sliverp/qqbot openclaw-channel-dingtalk"
+DEFAULT_BUILTIN_CHANNEL_PLUGINS="telegram imessage"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 RULE_PROFILE_SELECTED="$(echo "${RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]')"
 PROFILE_BASIC_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock"
@@ -1940,7 +1941,7 @@ install_default_official_plugins() {
         return 0
     fi
 
-    local script_dir cache_root cache_repo bundle_dir slug local_dir local_archive local_archive_prefixed
+    local script_dir cache_root cache_repo bundle_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     cache_root="$CONFIG_DIR/.cache"
     cache_repo="$cache_root/auto-install-openclaw-repo"
@@ -1951,48 +1952,107 @@ install_default_official_plugins() {
 
     cleanup_stale_plugin_state
 
-    log_step "同步默认官方插件集（仓库本地包优先）..."
+    log_step "同步默认消息渠道插件集（仓库本地包优先）..."
     local ok=0
     local fail=0
-    local plugin spec
+    local builtins_ok=0
+    local builtins_skip=0
+    local plugin spec local_source plugin_alias
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
         spec="$plugin"
-        slug="${spec#*@openclaw/}"
-        slug="${slug#/}"
-        local_dir="$bundle_dir/$slug"
-        local_archive="$bundle_dir/archives/${slug}.tgz"
-        local_archive_prefixed="$(ls -1 "$bundle_dir/archives/openclaw-${slug}-"*.tgz 2>/dev/null | head -1 || true)"
+        plugin_alias="$(plugin_enable_alias_from_spec_install "$spec")"
+        local_source="$(resolve_official_plugin_local_source_install "$spec" "$bundle_dir" 2>/dev/null || true)"
 
-        if [ -d "$local_dir" ] || [ -f "$local_archive" ] || [ -n "$local_archive_prefixed" ]; then
-            if [ -d "$local_dir" ] && (openclaw plugins install "$local_dir" --pin >/dev/null 2>&1 || openclaw plugins install "$local_dir" >/dev/null 2>&1); then
-                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
+        if [ -n "$local_source" ]; then
+            if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
+                openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
                 ok=$((ok + 1))
                 continue
             fi
-            if [ -f "$local_archive" ] && (openclaw plugins install "$local_archive" --pin >/dev/null 2>&1 || openclaw plugins install "$local_archive" >/dev/null 2>&1); then
-                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
-                ok=$((ok + 1))
-                continue
-            fi
-            if [ -n "$local_archive_prefixed" ] && (openclaw plugins install "$local_archive_prefixed" --pin >/dev/null 2>&1 || openclaw plugins install "$local_archive_prefixed" >/dev/null 2>&1); then
-                openclaw plugins enable "$slug" >/dev/null 2>&1 || true
-                ok=$((ok + 1))
-                continue
-            fi
-            log_warn "本地官方插件包安装失败: $spec"
+            log_warn "本地插件包安装失败: $spec -> $local_source"
             fail=$((fail + 1))
             continue
         fi
 
         if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
-            openclaw plugins enable "$slug" >/dev/null 2>&1 || true
+            openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
             ok=$((ok + 1))
         else
-            log_warn "官方插件本地包缺失或安装失败: $spec（仓库缺包时请补齐 plugins/official）"
+            log_warn "本地插件包缺失或安装失败: $spec（仓库缺包时请补齐 plugins/official）"
             fail=$((fail + 1))
         fi
     done
-    log_info "默认官方插件安装完成：成功 ${ok}，失败 ${fail}"
+
+    # Telegram / iMessage 在部分版本中是内置渠道能力，默认只做启用，不做远端安装。
+    local builtin_id
+    for builtin_id in $DEFAULT_BUILTIN_CHANNEL_PLUGINS; do
+        if openclaw plugins enable "$builtin_id" >/dev/null 2>&1; then
+            builtins_ok=$((builtins_ok + 1))
+        else
+            log_info "内置渠道插件未显式暴露，按内置渠道处理（跳过）: $builtin_id"
+            builtins_skip=$((builtins_skip + 1))
+        fi
+    done
+
+    log_info "默认消息渠道插件安装完成：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
+}
+
+plugin_bundle_slug_from_spec_install() {
+    local spec="$1"
+    local slug="${spec##*/}"
+    slug="${slug%@*}"
+    echo "$slug"
+}
+
+plugin_bundle_pack_name_from_spec_install() {
+    local spec="$1"
+    local base="${spec%@*}"
+    base="${base#@}"
+    echo "${base//\//-}"
+}
+
+plugin_enable_alias_from_spec_install() {
+    local spec="$1"
+    case "$spec" in
+        openclaw-wechat-channel* ) echo "wechat" ;;
+        openclaw-channel-dingtalk* ) echo "dingtalk" ;;
+        @sliverp/qqbot* ) echo "qqbot" ;;
+        @openclaw/* )
+            local alias="${spec#@openclaw/}"
+            alias="${alias%@*}"
+            echo "$alias"
+            ;;
+        * )
+            plugin_bundle_slug_from_spec_install "$spec"
+            ;;
+    esac
+}
+
+resolve_official_plugin_local_source_install() {
+    local plugin_spec="$1"
+    local bundle_dir="$2"
+    local slug
+    local pack_name
+    local candidate
+
+    slug="$(plugin_bundle_slug_from_spec_install "$plugin_spec")"
+    pack_name="$(plugin_bundle_pack_name_from_spec_install "$plugin_spec")"
+    for candidate in \
+        "$bundle_dir/$slug" \
+        "$bundle_dir/$pack_name" \
+        "$bundle_dir/${slug}.tgz" \
+        "$bundle_dir/${pack_name}.tgz" \
+        "$bundle_dir/archives/${slug}.tgz" \
+        "$bundle_dir/archives/${pack_name}.tgz" \
+        "$bundle_dir/archives/${slug}-"*.tgz \
+        "$bundle_dir/archives/${pack_name}-"*.tgz \
+        "$bundle_dir/archives/openclaw-${slug}-"*.tgz \
+        "$bundle_dir/archives/openclaw-${pack_name}-"*.tgz; do
+        [ -e "$candidate" ] || continue
+        echo "$candidate"
+        return 0
+    done
+    return 1
 }
 
 install_channel_assets() {
@@ -2001,9 +2061,11 @@ install_channel_assets() {
     local skills_root="$CONFIG_DIR/skills"
     local docs_dir="$CONFIG_DIR/docs"
     local doc_file="$docs_dir/channels-configuration-guide.md"
+    local source_index_file="$docs_dir/upstream-sources.md"
     local script_dir
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local local_doc="$script_dir/docs/channels-configuration-guide.md"
+    local local_source_index="$script_dir/docs/upstream-sources.md"
     local local_skill="$script_dir/skills/channel-setup-assistant/SKILL.md"
 
     mkdir -p "$skill_dir" "$skills_root" "$docs_dir" 2>/dev/null || true
@@ -2029,6 +2091,14 @@ install_channel_assets() {
 
 完整文档请查看仓库 `docs/channels-configuration-guide.md`。
 EOF
+    fi
+
+    if [ -f "$local_source_index" ]; then
+        cp "$local_source_index" "$source_index_file" 2>/dev/null || true
+    elif download_with_fallback "$source_index_file.tmp" "$GITHUB_RAW_URL/docs/upstream-sources.md" "$INSTALLER_MIRROR_RAW_URL/docs/upstream-sources.md"; then
+        mv "$source_index_file.tmp" "$source_index_file"
+    else
+        rm -f "$source_index_file.tmp" 2>/dev/null || true
     fi
 
     if [ -f "$local_skill" ]; then
@@ -2066,9 +2136,10 @@ EOF
 
     log_info "默认技能包将按规则档位注入（低/中/高），此步骤仅注入渠道文档与渠道助手 Skill。"
 
-    chmod 644 "$skill_file" "$doc_file" 2>/dev/null || true
+    chmod 644 "$skill_file" "$doc_file" "$source_index_file" 2>/dev/null || true
     log_info "已注入渠道配置文档与 Skill:"
     log_info "  文档: $doc_file"
+    log_info "  上游索引: $source_index_file"
     log_info "  Skill: $skill_file"
 }
 
@@ -3850,7 +3921,9 @@ main() {
         exit 1
     fi
     cleanup_stale_plugin_state
-    log_info "已跳过初装阶段官方插件安装；将在后续配置菜单中按仓库本地包同步官方插件。"
+    if ! run_step_with_auto_fix "同步默认消息渠道插件（本地仓库）" install_default_official_plugins; then
+        log_warn "默认消息渠道插件同步未完全成功，可稍后在配置菜单中重试。"
+    fi
     if [ "$NO_ONBOARD" = "1" ]; then
         log_info "已按参数跳过 AI 初始化向导 (--no-onboard)"
     else

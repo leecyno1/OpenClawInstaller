@@ -133,7 +133,8 @@ AUTO_FIX_OPENCLAW_REPO_MIRROR_URL="${AUTO_FIX_OPENCLAW_REPO_MIRROR_URL:-https://
 AUTO_FIX_OPENCLAW_DIR="${AUTO_FIX_OPENCLAW_DIR:-$HOME/.openclaw/tools/auto-fix-openclaw}"
 AUTO_FIX_OPENCLAW_BIN="$AUTO_FIX_OPENCLAW_DIR/bin/auto-fix-openclaw"
 
-DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
+DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/discord @openclaw/whatsapp openclaw-wechat-channel @sliverp/qqbot openclaw-channel-dingtalk"
+DEFAULT_BUILTIN_CHANNEL_PLUGINS="telegram imessage"
 ENHANCED_SKILLS_LIST="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx frontend-design web-design stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 PROFILE_BASIC_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock"
@@ -147,6 +148,13 @@ NANO_BANANA_IMAGE_MODEL_DEFAULT="${NANO_BANANA_IMAGE_MODEL:-nano-banana-pro-imag
 NANO_BANANA_VIDEO_MODEL_DEFAULT="${NANO_BANANA_VIDEO_MODEL:-nano-banana-pro-video}"
 SILICONFLOW_FALLBACK_API_URL="${OPENCLAW_UNOFFICIAL_OPENAI_API_URL:-https://api.siliconflow.cn/v1}"
 SILICONFLOW_FALLBACK_MODEL="${OPENCLAW_UNOFFICIAL_OPENAI_MODEL:-Qwen/Qwen3-8B}"
+UNOFFICIAL_ADVANCED_DEFAULT_TYPE="${OPENCLAW_UNOFFICIAL_ADVANCED_API_TYPE:-openai}"
+UNOFFICIAL_ADVANCED_DEFAULT_URL_OPENAI="${OPENCLAW_UNOFFICIAL_ADVANCED_OPENAI_API_URL:-https://api.openai.com/v1}"
+UNOFFICIAL_ADVANCED_DEFAULT_URL_ANTHROPIC="${OPENCLAW_UNOFFICIAL_ADVANCED_ANTHROPIC_API_URL:-https://api.anthropic.com}"
+UNOFFICIAL_ADVANCED_DEFAULT_MODEL_CLAUDE="${OPENCLAW_UNOFFICIAL_ADVANCED_CLAUDE_MODEL:-claude-sonnet-4-6}"
+UNOFFICIAL_ADVANCED_DEFAULT_MODEL_GPT="${OPENCLAW_UNOFFICIAL_ADVANCED_GPT_MODEL:-gpt-5.1-codex}"
+UNOFFICIAL_ROUTING_DEFAULT_STRATEGY="${OPENCLAW_UNOFFICIAL_ROUTING_STRATEGY:-auto}"
+UNOFFICIAL_ROUTING_DEFAULT_FAILOVER="${OPENCLAW_UNOFFICIAL_ROUTING_FAILOVER:-1}"
 UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE=0
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
@@ -3907,9 +3915,9 @@ install_default_official_plugins_local_bundle_only() {
         return 1
     fi
 
-    local plugin plugin_alias ok=0 fail=0
+    local plugin plugin_alias ok=0 fail=0 builtins_ok=0 builtins_skip=0
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
-        plugin_alias="$(plugin_bundle_slug_from_spec "$plugin")"
+        plugin_alias="$(plugin_enable_alias_from_spec "$plugin")"
         if install_official_plugin_local_first "$plugin" "$plugin_alias"; then
             ok=$((ok + 1))
         else
@@ -3917,7 +3925,17 @@ install_default_official_plugins_local_bundle_only() {
         fi
     done
 
-    log_info "非官方渠道预置官方插件完成：成功 ${ok}，失败 ${fail}"
+    local builtin_id
+    for builtin_id in $DEFAULT_BUILTIN_CHANNEL_PLUGINS; do
+        if openclaw plugins enable "$builtin_id" >/dev/null 2>&1; then
+            ensure_plugin_in_allow "$builtin_id" || true
+            builtins_ok=$((builtins_ok + 1))
+        else
+            builtins_skip=$((builtins_skip + 1))
+        fi
+    done
+
+    log_info "非官方渠道预置消息插件完成：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
     return 0
 }
 
@@ -3932,7 +3950,7 @@ bootstrap_unofficial_channels_prerequisites() {
     fi
 
     echo ""
-    log_info "进入非官方渠道配置前，正在同步仓库内官方插件本地包..."
+    log_info "进入非官方渠道配置前，正在同步仓库内默认消息插件..."
     install_default_official_plugins_local_bundle_only || true
 }
 
@@ -3979,6 +3997,171 @@ config_unofficial_fallback_model() {
     press_enter
 }
 
+config_unofficial_advanced_model() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🚀 非官方渠道高级模型（Claude/GPT）${NC}"
+    print_divider
+    echo ""
+    echo -e "${GRAY}该配置与“兜底模型（硅基流动）”平行，不会覆盖主模型配置。${NC}"
+    echo -e "${GRAY}建议用于复杂任务，配合“模型自动切换路由”实现自动分流。${NC}"
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        press_enter
+        return
+    fi
+
+    local model_type_choice="" model_type="gpt" api_type="openai" default_url="" default_model=""
+    print_menu_item "1" "Claude（Anthropic 兼容）" "🟣"
+    print_menu_item "2" "GPT（OpenAI 兼容）" "🟢"
+    echo ""
+    read_input "${YELLOW}请选择 [1-2] (默认: 2): ${NC}" model_type_choice
+    model_type_choice="${model_type_choice:-2}"
+    case "$model_type_choice" in
+        1)
+            model_type="claude"
+            api_type="anthropic"
+            default_url="$UNOFFICIAL_ADVANCED_DEFAULT_URL_ANTHROPIC"
+            default_model="$UNOFFICIAL_ADVANCED_DEFAULT_MODEL_CLAUDE"
+            ;;
+        *)
+            model_type="gpt"
+            api_type="openai"
+            default_url="$UNOFFICIAL_ADVANCED_DEFAULT_URL_OPENAI"
+            default_model="$UNOFFICIAL_ADVANCED_DEFAULT_MODEL_GPT"
+            ;;
+    esac
+
+    local base_url="" api_key="" model_name=""
+    read_input "${YELLOW}API URL (默认: ${default_url}): ${NC}" base_url
+    base_url="${base_url:-$default_url}"
+    read_secret_input "${YELLOW}API Key: ${NC}" api_key
+    read_input "${YELLOW}Model (默认: ${default_model}): ${NC}" model_name
+    model_name="${model_name:-$default_model}"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ] || [ -z "$model_name" ]; then
+        log_error "URL / Key / Model 不能为空"
+        press_enter
+        return
+    fi
+
+    openclaw config set channels.unofficial.advanced.enabled true >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.advanced.type "$model_type" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.advanced.apiType "$api_type" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.advanced.openaiApiUrl "$base_url" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.advanced.model "$model_name" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.advanced.apiKey "$api_key" >/dev/null 2>&1 || true
+
+    openclaw config set plugins.community.advanced.enabled true >/dev/null 2>&1 || true
+    openclaw config set plugins.community.advanced.type "$model_type" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.advanced.apiType "$api_type" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.advanced.openaiApiUrl "$base_url" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.advanced.model "$model_name" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.advanced.apiKey "$api_key" >/dev/null 2>&1 || true
+
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ADVANCED_MODEL_TYPE" "$model_type"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ADVANCED_API_TYPE" "$api_type"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ADVANCED_OPENAI_API_URL" "$base_url"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ADVANCED_MODEL" "$model_name"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ADVANCED_API_KEY" "$api_key"
+
+    log_info "非官方渠道高级模型已保存"
+    echo -e "${CYAN}类型:${NC} ${WHITE}${model_type}${NC}"
+    echo -e "${CYAN}模型:${NC} ${WHITE}${model_name}${NC}"
+    echo -e "${CYAN}URL:${NC} ${WHITE}${base_url}${NC}"
+
+    if confirm "是否立即测试该高级模型连通性？" "y"; then
+        if [ "$api_type" = "anthropic" ]; then
+            test_ai_connection "anthropic" "$api_key" "$model_name" "$base_url" || true
+        else
+            test_ai_connection "openai" "$api_key" "$model_name" "$base_url" || true
+        fi
+    fi
+
+    press_enter
+}
+
+config_unofficial_model_routing() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🧭 非官方渠道模型自动切换路由${NC}"
+    print_divider
+    echo ""
+    echo -e "${GRAY}路由说明:${NC}"
+    echo -e "  ${WHITE}auto${NC}: 自动判断复杂请求走高级模型，失败自动回退兜底模型"
+    echo -e "  ${WHITE}advanced_first${NC}: 默认走高级模型，失败回退兜底模型"
+    echo -e "  ${WHITE}fallback_only${NC}: 仅使用兜底模型"
+    echo ""
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        press_enter
+        return
+    fi
+
+    local routing_enabled_choice="" routing_enabled="1"
+    local routing_strategy_choice="" routing_strategy="$UNOFFICIAL_ROUTING_DEFAULT_STRATEGY"
+    local routing_failover_choice="" routing_failover="$UNOFFICIAL_ROUTING_DEFAULT_FAILOVER"
+
+    read_input "${YELLOW}启用自动切换路由？[Y/n]: ${NC}" routing_enabled_choice
+    routing_enabled_choice="${routing_enabled_choice:-y}"
+    case "$(echo "$routing_enabled_choice" | tr '[:upper:]' '[:lower:]')" in
+        n|no|0|false) routing_enabled="0" ;;
+        *) routing_enabled="1" ;;
+    esac
+
+    if [ "$routing_enabled" = "1" ]; then
+        print_menu_item "1" "auto（智能分流）" "🤖"
+        print_menu_item "2" "advanced_first（高级优先）" "🚀"
+        print_menu_item "3" "fallback_only（仅兜底）" "🛟"
+        echo ""
+        read_input "${YELLOW}路由策略 [1-3] (默认: 1): ${NC}" routing_strategy_choice
+        routing_strategy_choice="${routing_strategy_choice:-1}"
+        case "$routing_strategy_choice" in
+            2) routing_strategy="advanced_first" ;;
+            3) routing_strategy="fallback_only" ;;
+            *) routing_strategy="auto" ;;
+        esac
+
+        read_input "${YELLOW}高级模型失败时自动回退兜底模型？[Y/n]: ${NC}" routing_failover_choice
+        routing_failover_choice="${routing_failover_choice:-y}"
+        case "$(echo "$routing_failover_choice" | tr '[:upper:]' '[:lower:]')" in
+            n|no|0|false) routing_failover="0" ;;
+            *) routing_failover="1" ;;
+        esac
+    else
+        routing_strategy="fallback_only"
+        routing_failover="1"
+    fi
+
+    openclaw config set channels.unofficial.routing.enabled "$routing_enabled" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.routing.strategy "$routing_strategy" >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.routing.primary advanced >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.routing.secondary fallback >/dev/null 2>&1 || true
+    openclaw config set channels.unofficial.routing.failover "$routing_failover" >/dev/null 2>&1 || true
+
+    openclaw config set plugins.community.routing.enabled "$routing_enabled" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.routing.strategy "$routing_strategy" >/dev/null 2>&1 || true
+    openclaw config set plugins.community.routing.primary advanced >/dev/null 2>&1 || true
+    openclaw config set plugins.community.routing.secondary fallback >/dev/null 2>&1 || true
+    openclaw config set plugins.community.routing.failover "$routing_failover" >/dev/null 2>&1 || true
+
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ROUTING_ENABLED" "$routing_enabled"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ROUTING_STRATEGY" "$routing_strategy"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ROUTING_PRIMARY" "advanced"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ROUTING_SECONDARY" "fallback"
+    upsert_env_export "OPENCLAW_UNOFFICIAL_ROUTING_FAILOVER" "$routing_failover"
+
+    log_info "模型自动切换路由已保存"
+    echo -e "${CYAN}启用:${NC} ${WHITE}${routing_enabled}${NC}"
+    echo -e "${CYAN}策略:${NC} ${WHITE}${routing_strategy}${NC}"
+    echo -e "${CYAN}失败回退:${NC} ${WHITE}${routing_failover}${NC}"
+    echo -e "${CYAN}已写入:${NC} channels.unofficial.routing.* / plugins.community.routing.*"
+    press_enter
+}
+
 config_channels_unofficial() {
     bootstrap_unofficial_channels_prerequisites
     clear_screen
@@ -3998,10 +4181,12 @@ config_channels_unofficial() {
     print_menu_item "5" "钉钉/QQ/企业微信 官方状态检查" "🧾"
     print_menu_item "6" "iMessage（旧版）" "🍎"
     print_menu_item "7" "非官方渠道兜底模型（硅基流动）" "🛟"
+    print_menu_item "8" "非官方渠道高级模型（Claude/GPT）" "🚀"
+    print_menu_item "9" "模型自动切换路由" "🧭"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
 
-    echo -en "${YELLOW}请选择 [0-7]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-9]: ${NC}"
     read choice < "$TTY_INPUT"
 
     case $choice in
@@ -4012,6 +4197,8 @@ config_channels_unofficial() {
         5) check_cn_enterprise_channel_official_status ;;
         6) config_imessage ;;
         7) config_unofficial_fallback_model ;;
+        8) config_unofficial_advanced_model ;;
+        9) config_unofficial_model_routing ;;
         0) return ;;
         *) log_error "无效选择"; press_enter; config_channels_unofficial ;;
     esac
@@ -4339,6 +4526,23 @@ plugin_bundle_pack_name_from_spec() {
     local base="${spec%@*}"
     base="${base#@}"
     echo "${base//\//-}"
+}
+
+plugin_enable_alias_from_spec() {
+    local spec="$1"
+    case "$spec" in
+        openclaw-wechat-channel* ) echo "wechat" ;;
+        openclaw-channel-dingtalk* ) echo "dingtalk" ;;
+        @sliverp/qqbot* ) echo "qqbot" ;;
+        @openclaw/* )
+            local alias="${spec#@openclaw/}"
+            alias="${alias%@*}"
+            echo "$alias"
+            ;;
+        * )
+            plugin_bundle_slug_from_spec "$spec"
+            ;;
+    esac
 }
 
 resolve_official_plugins_bundle_dir() {
@@ -6489,9 +6693,9 @@ install_default_official_plugins_menu() {
         return 1
     fi
 
-    local plugin plugin_alias ok=0 fail=0
+    local plugin plugin_alias ok=0 fail=0 builtins_ok=0 builtins_skip=0
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
-        plugin_alias="$(plugin_bundle_slug_from_spec "$plugin")"
+        plugin_alias="$(plugin_enable_alias_from_spec "$plugin")"
         if install_official_plugin_local_first "$plugin" "$plugin_alias"; then
             openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
             log_info "已安装官方插件: $plugin"
@@ -6501,13 +6705,25 @@ install_default_official_plugins_menu() {
             fail=$((fail + 1))
         fi
     done
-    log_info "官方插件安装完成：成功 ${ok}，失败 ${fail}"
+
+    local builtin_id
+    for builtin_id in $DEFAULT_BUILTIN_CHANNEL_PLUGINS; do
+        if openclaw plugins enable "$builtin_id" >/dev/null 2>&1; then
+            ensure_plugin_in_allow "$builtin_id" || true
+            builtins_ok=$((builtins_ok + 1))
+        else
+            log_info "内置渠道插件未显式暴露，按内置渠道处理（跳过）: $builtin_id"
+            builtins_skip=$((builtins_skip + 1))
+        fi
+    done
+
+    log_info "官方插件安装完成：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
 }
 
 manage_official_plugins() {
     clear_screen
     print_header
-    echo -e "${WHITE}🧭 官方插件管理${NC}"
+    echo -e "${WHITE}🧭 默认消息插件管理${NC}"
     print_divider
     echo ""
 
@@ -6517,8 +6733,8 @@ manage_official_plugins() {
         return
     fi
 
-    print_menu_item "1" "查看官方插件列表" "📋"
-    print_menu_item "2" "安装默认官方插件集（本地包）" "📦"
+    print_menu_item "1" "查看当前插件列表" "📋"
+    print_menu_item "2" "安装默认消息插件集（本地包）" "📦"
     print_menu_item "3" "更新全部插件" "⬆️"
     print_menu_item "4" "跳转官方 Skills 设置" "🚀"
     print_menu_item "0" "返回上级菜单" "↩️"
@@ -8005,6 +8221,104 @@ run_openclaw_upgrade_pipeline() {
     return 0
 }
 
+reset_openclaw_to_factory_state() {
+    clear_screen
+    print_header
+
+    echo -e "${WHITE}♻️ 一键重置 OpenClaw（初始化）${NC}"
+    print_divider
+    echo ""
+    echo -e "${YELLOW}该操作将清空以下内容：${NC}"
+    echo "  - 所有 API Key / Secret / Token（env 与配置）"
+    echo "  - 消息渠道配置与配对数据（channels / pairing / credentials）"
+    echo "  - 身份人设、token规划规则注入、非官方模型路由等运行配置"
+    echo ""
+    echo -e "${CYAN}保留内容：${NC}"
+    echo "  - 已安装的 OpenClaw 程序"
+    echo "  - skills 与 plugins 目录文件"
+    echo ""
+
+    if ! confirm "确认执行一键重置？" "n"; then
+        log_info "已取消重置"
+        return 0
+    fi
+
+    local confirm_word=""
+    read_input "${YELLOW}请输入 RESET 以继续: ${NC}" confirm_word
+    if [ "$confirm_word" != "RESET" ]; then
+        log_warn "校验词不匹配，已取消"
+        return 1
+    fi
+
+    local ts backup_dir
+    ts="$(date +%Y%m%d_%H%M%S)"
+    backup_dir="$BACKUP_DIR/factory_reset_${ts}"
+    mkdir -p "$backup_dir" 2>/dev/null || true
+
+    local gateway_host gateway_port
+    gateway_host="$(get_gateway_host)"
+    gateway_port="$(get_gateway_port)"
+
+    # 先停服务，避免重置过程被运行中的 gateway 覆盖回写
+    stop_openclaw_for_uninstall || true
+
+    # 备份关键配置，便于误操作后手动恢复
+    [ -f "$OPENCLAW_ENV" ] && cp "$OPENCLAW_ENV" "$backup_dir/env.bak" 2>/dev/null || true
+    [ -f "$OPENCLAW_JSON" ] && cp "$OPENCLAW_JSON" "$backup_dir/openclaw.json.bak" 2>/dev/null || true
+
+    # 清空环境变量配置文件（仅保留网关最小启动参数）
+    rm -f "$OPENCLAW_ENV" 2>/dev/null || true
+    touch "$OPENCLAW_ENV" 2>/dev/null || true
+    upsert_env_export "OPENCLAW_GATEWAY_HOST" "$gateway_host"
+    upsert_env_export "OPENCLAW_GATEWAY_PORT" "$gateway_port"
+    chmod 600 "$OPENCLAW_ENV" 2>/dev/null || true
+
+    # 重置主配置为最小空配置
+    mkdir -p "$(dirname "$OPENCLAW_JSON")" 2>/dev/null || true
+    printf "{}\n" > "$OPENCLAW_JSON"
+    chmod 600 "$OPENCLAW_JSON" 2>/dev/null || true
+
+    # 清空敏感与会话运行数据（保留 skills/plugins）
+    rm -rf "$CONFIG_DIR/credentials" 2>/dev/null || true
+    rm -rf "$CONFIG_DIR/policy" 2>/dev/null || true
+    rm -rf "$CONFIG_DIR/channels" 2>/dev/null || true
+    rm -rf "$CONFIG_DIR/pairing" "$CONFIG_DIR/pairings" 2>/dev/null || true
+    rm -rf "$CONFIG_DIR/agents/main/sessions" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/agents/main/agent/vendor-control-system.md" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/agents/main/memory/vendor-control-memory.md" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/agents/main/soul/vendor-control-soul.md" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/agents/main/sessions/vendor-control-session.md" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/docs/assistant-base-profile.md" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/docs/startup-welcome-message.md" 2>/dev/null || true
+
+    mkdir -p "$CONFIG_DIR/credentials" "$CONFIG_DIR/agents/main/sessions" "$CONFIG_DIR/docs" 2>/dev/null || true
+
+    # 若 openclaw CLI 可用，补回最小可运行网关参数
+    if check_openclaw_installed; then
+        openclaw config set gateway.mode local >/dev/null 2>&1 || true
+        openclaw config set gateway.host "$gateway_host" >/dev/null 2>&1 || true
+        openclaw config set gateway.port "$gateway_port" >/dev/null 2>&1 || true
+        openclaw config set gateway.bind "$gateway_host:$gateway_port" >/dev/null 2>&1 || true
+        # 额外确保高频冲突项被清理
+        openclaw config unset channels >/dev/null 2>&1 || true
+        openclaw config unset plugins.entries >/dev/null 2>&1 || true
+        openclaw config unset plugins.allow >/dev/null 2>&1 || true
+        openclaw config unset plugins.community >/dev/null 2>&1 || true
+        openclaw config unset identity >/dev/null 2>&1 || true
+        openclaw config unset vendor.control >/dev/null 2>&1 || true
+    fi
+
+    echo ""
+    log_info "一键重置完成（已恢复到初始化状态）"
+    echo -e "  备份目录: ${WHITE}${backup_dir}${NC}"
+    echo -e "  网关保留: ${WHITE}${gateway_host}:${gateway_port}${NC}"
+    echo ""
+
+    if check_openclaw_installed && confirm "是否立即重启 Gateway（应用最小配置）？" "y"; then
+        restart_gateway_for_channel || true
+    fi
+}
+
 advanced_settings() {
     clear_screen
     print_header
@@ -8016,7 +8330,7 @@ advanced_settings() {
     print_menu_item "1" "编辑环境变量" "📝"
     print_menu_item "2" "备份配置" "💾"
     print_menu_item "3" "恢复配置" "📥"
-    print_menu_item "4" "重置配置" "🔄"
+    print_menu_item "4" "一键重置（初始化）" "♻️"
     print_menu_item "5" "清理日志" "🧹"
     print_menu_item "6" "更新 OpenClaw" "⬆️"
     print_menu_item "7" "卸载 OpenClaw" "🗑️"
@@ -8059,11 +8373,7 @@ advanced_settings() {
             restore_config
             ;;
         4)
-            if confirm "确定要重置所有配置吗？这将删除当前配置" "n"; then
-                rm -f "$OPENCLAW_ENV"
-                rm -rf "$CONFIG_DIR/openclaw.json" 2>/dev/null
-                log_info "配置已重置，请重新运行安装脚本"
-            fi
+            reset_openclaw_to_factory_state
             ;;
         5)
             if confirm "确定要清理日志吗？" "n"; then
