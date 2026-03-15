@@ -95,7 +95,7 @@ AUTO_FIX_ATTEMPTED=0
 DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 RULE_PROFILE_SELECTED="$(echo "${RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]')"
-PROFILE_BASIC_SKILLS="find-skills shell summarize web-search url-to-markdown"
+PROFILE_BASIC_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock"
 PROFILE_EXTENDED_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 PROFILE_SUPER_SKILLS="__ALL_DEFAULT__"
 GEMINI_BASE_URL_DEFAULT="${GEMINI_BASE_URL:-${GOOGLE_BASE_URL:-}}"
@@ -297,7 +297,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --verbose                            详细日志
   --gateway-host <host>               Gateway 监听地址 (默认: 127.0.0.1)
   --gateway-port <port>               Gateway 监听端口 (默认: 13145)
-  --rule-profile <low|medium|high>    token规划规则档位 (默认: medium)
+  --rule-profile <low|medium|high|none> token规划规则档位 (默认: medium)
   --help, -h                           显示帮助
 
 环境变量:
@@ -322,7 +322,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_SWAP_TARGET_MB=<默认自动(2G或4G)>
   OPENCLAW_SWAP_FILE=</swapfile.openclaw>
   OPENCLAW_SKILLS_FORCE_UPDATE=0|1
-  OPENCLAW_RULE_PROFILE=low|medium|high
+  OPENCLAW_RULE_PROFILE=low|medium|high|none
   GEMINI_BASE_URL=<third_party_gemini_url>
   GEMINI_IMAGE_MODEL=<gemini_image_model>
   NANO_BANANA_BASE_URL=<third_party_nano_url>
@@ -498,10 +498,11 @@ remove_env_export_install() {
 normalize_rule_profile_level() {
     local level="$(echo "${1:-$RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     case "$level" in
-        low|medium|high) echo "$level" ;;
+        low|medium|high|none) echo "$level" ;;
         l) echo "low" ;;
         m|mid) echo "medium" ;;
         h) echo "high" ;;
+        n|no|skip|off) echo "none" ;;
         *) echo "medium" ;;
     esac
 }
@@ -510,6 +511,7 @@ get_profile_skill_list() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
+        none) echo "" ;;
         low) echo "$PROFILE_BASIC_SKILLS" ;;
         medium) echo "$PROFILE_EXTENDED_SKILLS" ;;
         high) echo "$PROFILE_SUPER_SKILLS" ;;
@@ -521,17 +523,20 @@ get_profile_token_limits() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
+        none)
+            echo "0 0 0 0"
+            ;;
         low)
-            echo "5 50 300000 12000"
+            echo "5 50 600000 24000"
             ;;
         medium)
-            echo "5 160 1200000 24000"
+            echo "5 160 2400000 48000"
             ;;
         high)
-            echo "5 360 3000000 40000"
+            echo "5 360 6000000 80000"
             ;;
         *)
-            echo "5 160 1200000 24000"
+            echo "5 160 2400000 48000"
             ;;
     esac
 }
@@ -540,6 +545,14 @@ get_profile_prompt_text() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
+        none)
+            cat <<'EOF'
+未注入 token规划规则（NONE）。
+- 跳过本轮 token/request 限流与策略文件写入。
+- 跳过档位 API 参数采集与技能档位注入。
+- 仅保留现有配置，不做额外变更。
+EOF
+            ;;
         low)
             cat <<'EOF'
 你是受控执行模式（LOW）。
@@ -591,6 +604,7 @@ select_rule_profile_level() {
     echo -e "  ${CYAN}[1]${NC} LOW    - 基础档（5小时 50 次）"
     echo -e "  ${CYAN}[2]${NC} MEDIUM - 扩展档（5小时 160 次）"
     echo -e "  ${CYAN}[3]${NC} HIGH   - 超级档（5小时 360 次）"
+    echo -e "  ${CYAN}[4]${NC} NONE   - 跳过本次注入"
     echo ""
 
     if [ "$NO_PROMPT" = "1" ] || [ "$TTY_INPUT" = "/dev/null" ]; then
@@ -604,15 +618,17 @@ select_rule_profile_level() {
         low) default_choice="1" ;;
         medium) default_choice="2" ;;
         high) default_choice="3" ;;
+        none) default_choice="4" ;;
     esac
 
     local profile_choice=""
-    read_input "${YELLOW}请选择规则档位 [1-3] (默认: ${default_choice}): ${NC}" profile_choice
+    read_input "${YELLOW}请选择规则档位 [1-4] (默认: ${default_choice}): ${NC}" profile_choice
     profile_choice="${profile_choice:-$default_choice}"
     case "$profile_choice" in
         1) RULE_PROFILE_SELECTED="low" ;;
         2) RULE_PROFILE_SELECTED="medium" ;;
         3) RULE_PROFILE_SELECTED="high" ;;
+        4) RULE_PROFILE_SELECTED="none" ;;
         *)
             log_warn "无效选择，回退默认档位: ${default_level}"
             RULE_PROFILE_SELECTED="$default_level"
@@ -706,6 +722,10 @@ EOF
 configure_profile_api_keys() {
     local level
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过档位 API 参数配置。"
+        return 0
+    fi
 
     echo ""
     log_step "配置档位 API 参数（BraveSearch / NanoBanana / Gemini）..."
@@ -760,6 +780,10 @@ configure_profile_api_keys() {
 apply_profile_token_policy() {
     local level
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过 token/request 限流配置。"
+        return 0
+    fi
     local limits window_hours max_requests max_tokens max_tokens_per_req
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
@@ -783,6 +807,10 @@ apply_profile_token_policy() {
 apply_profile_skill_policy() {
     local level
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过档位技能注入。"
+        return 0
+    fi
     local bundle_dir skills_list target_dir force_update copied skipped missing
     copied=0
     skipped=0
@@ -844,6 +872,10 @@ apply_profile_skill_policy() {
 write_profile_policy_files() {
     local level
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过 token规划规则策略文件写入。"
+        return 0
+    fi
     local limits window_hours max_requests max_tokens max_tokens_per_req
     local prompt_text
     local now_iso
@@ -1007,6 +1039,12 @@ apply_vendor_rule_profile() {
     level="$(normalize_rule_profile_level "$RULE_PROFILE_SELECTED")"
     RULE_PROFILE_SELECTED="$level"
     upsert_env_export_install "OPENCLAW_RULE_PROFILE" "$level"
+
+    if [ "$level" = "none" ]; then
+        echo ""
+        log_info "已跳过 token规划规则注入，保持当前策略与限流配置不变。"
+        return 0
+    fi
 
     local limits prompt_text
     limits="$(get_profile_token_limits "$level")"

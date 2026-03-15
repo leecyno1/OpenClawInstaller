@@ -136,7 +136,7 @@ AUTO_FIX_OPENCLAW_BIN="$AUTO_FIX_OPENCLAW_DIR/bin/auto-fix-openclaw"
 DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/msteams @openclaw/mattermost @openclaw/matrix @openclaw/line @openclaw/nextcloud-talk @openclaw/twitch @openclaw/zalo @openclaw/zalouser @openclaw/nostr @openclaw/tlon @openclaw/synology-chat @openclaw/bluebubbles"
 ENHANCED_SKILLS_LIST="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx frontend-design web-design stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
-PROFILE_BASIC_SKILLS="find-skills shell summarize web-search url-to-markdown"
+PROFILE_BASIC_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock"
 PROFILE_EXTENDED_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock gemini-image-service nano-banana-service"
 PROFILE_SUPER_SKILLS="__ALL_DEFAULT__"
 RULE_PROFILE_MENU_SELECTED=""
@@ -662,10 +662,11 @@ normalize_rule_profile_level() {
     local level
     level="$(echo "${1:-$RULE_PROFILE_DEFAULT}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
     case "$level" in
-        low|medium|high) echo "$level" ;;
+        low|medium|high|none) echo "$level" ;;
         l) echo "low" ;;
         m|mid) echo "medium" ;;
         h) echo "high" ;;
+        n|no|skip|off) echo "none" ;;
         *) echo "medium" ;;
     esac
 }
@@ -674,6 +675,7 @@ get_profile_skill_list() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
+        none) echo "" ;;
         low) echo "$PROFILE_BASIC_SKILLS" ;;
         medium) echo "$PROFILE_EXTENDED_SKILLS" ;;
         high) echo "$PROFILE_SUPER_SKILLS" ;;
@@ -685,10 +687,11 @@ get_profile_token_limits() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
-        low) echo "5 50 300000 12000" ;;
-        medium) echo "5 160 1200000 24000" ;;
-        high) echo "5 360 3000000 40000" ;;
-        *) echo "5 160 1200000 24000" ;;
+        none) echo "0 0 0 0" ;;
+        low) echo "5 50 600000 24000" ;;
+        medium) echo "5 160 2400000 48000" ;;
+        high) echo "5 360 6000000 80000" ;;
+        *) echo "5 160 2400000 48000" ;;
     esac
 }
 
@@ -696,6 +699,14 @@ get_profile_prompt_text() {
     local level
     level="$(normalize_rule_profile_level "$1")"
     case "$level" in
+        none)
+            cat <<'EOF'
+未注入 token规划规则（NONE）。
+- 跳过本轮 token/request 限流与策略文件写入。
+- 跳过档位 API 参数采集与技能档位注入。
+- 仅保留现有配置，不做额外变更。
+EOF
+            ;;
         low)
             cat <<'EOF'
 你是受控执行模式（LOW）。
@@ -809,6 +820,10 @@ EOF
 configure_profile_api_keys_menu() {
     local level
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过档位 API 参数配置。"
+        return 0
+    fi
 
     echo ""
     log_info "配置档位 API 参数（BraveSearch / NanoBanana / Gemini）..."
@@ -863,6 +878,10 @@ configure_profile_api_keys_menu() {
 apply_profile_token_policy_menu() {
     local level limits window_hours max_requests max_tokens max_tokens_per_req
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过 token/request 限流配置。"
+        return 0
+    fi
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
     max_requests="$(echo "$limits" | awk '{print $2}')"
@@ -885,6 +904,10 @@ apply_profile_token_policy_menu() {
 apply_profile_skill_policy_menu() {
     local level bundle_dir skills_list target_dir force_update copied skipped missing
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过档位技能注入。"
+        return 0
+    fi
     force_update="${2:-0}"
     target_dir="$CONFIG_DIR/skills"
     copied=0
@@ -943,6 +966,10 @@ write_profile_policy_files_menu() {
     local system_rule_file memory_rule_file session_rule_file soul_rule_file policy_json prompt_file
 
     level="$(normalize_rule_profile_level "$1")"
+    if [ "$level" = "none" ]; then
+        log_info "已选择 NONE，跳过 token规划规则策略文件写入。"
+        return 0
+    fi
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
     max_requests="$(echo "$limits" | awk '{print $2}')"
@@ -1103,14 +1130,23 @@ select_rule_profile_level_menu() {
     echo -e "  ${CYAN}[1]${NC} LOW    - 基础档（5小时 50 次）"
     echo -e "  ${CYAN}[2]${NC} MEDIUM - 扩展档（5小时 160 次）"
     echo -e "  ${CYAN}[3]${NC} HIGH   - 超级档（5小时 360 次）"
+    echo -e "  ${CYAN}[4]${NC} NONE   - 跳过本次注入"
     echo ""
-    read_input "${YELLOW}请选择 [1-3] (默认: 2): ${NC}" profile_choice
-    profile_choice="${profile_choice:-2}"
+    local default_choice="2"
+    case "$default_level" in
+        low) default_choice="1" ;;
+        medium) default_choice="2" ;;
+        high) default_choice="3" ;;
+        none) default_choice="4" ;;
+    esac
+    read_input "${YELLOW}请选择 [1-4] (默认: ${default_choice}): ${NC}" profile_choice
+    profile_choice="${profile_choice:-$default_choice}"
 
     case "$profile_choice" in
         1) RULE_PROFILE_MENU_SELECTED="low" ;;
         2) RULE_PROFILE_MENU_SELECTED="medium" ;;
         3) RULE_PROFILE_MENU_SELECTED="high" ;;
+        4) RULE_PROFILE_MENU_SELECTED="none" ;;
         *)
             log_warn "无效选择，回退默认档位: ${default_level}"
             RULE_PROFILE_MENU_SELECTED="$default_level"
@@ -1124,6 +1160,12 @@ apply_vendor_rule_profile_menu() {
     level="$RULE_PROFILE_MENU_SELECTED"
     level="$(normalize_rule_profile_level "$level")"
     upsert_env_export "OPENCLAW_RULE_PROFILE" "$level"
+
+    if [ "$level" = "none" ]; then
+        echo ""
+        log_info "已跳过 token规划规则注入，保持当前策略与限流配置不变。"
+        return 0
+    fi
 
     configure_profile_api_keys_menu "$level"
     apply_profile_token_policy_menu "$level"
@@ -7979,7 +8021,7 @@ advanced_settings() {
     print_menu_item "6" "更新 OpenClaw" "⬆️"
     print_menu_item "7" "卸载 OpenClaw" "🗑️"
     print_menu_item "8" "AI 自动修复 OpenClaw" "🛠️"
-    print_menu_item "9" "token规划规则注入（低/中/高）" "🏭"
+    print_menu_item "9" "token规划规则注入（低/中/高/跳过）" "🏭"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
     
