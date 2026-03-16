@@ -12,24 +12,6 @@
    - `openclaw gateway restart`
    - `openclaw channels list`
 4. 如需追踪插件与 skills 上游来源，查看：`docs/upstream-sources.md`
-5. 如需命令行快速配对，使用：`~/.openclaw/bin/openclaw-channel-pair`
-
-### 快速配对示例
-
-```bash
-# QQ
-~/.openclaw/bin/openclaw-channel-pair --channel qqbot --token "APP_ID:APP_SECRET" --restart
-
-# 飞书
-~/.openclaw/bin/openclaw-channel-pair --channel feishu --token "APP_ID:APP_SECRET" --restart
-
-# 企业微信（官方插件，机器人模式）
-~/.openclaw/bin/openclaw-channel-pair --channel wecom --token "TOKEN:ENCODING_AES_KEY:RECEIVE_ID" --restart
-
-# 钉钉
-~/.openclaw/bin/openclaw-channel-pair --channel dingtalk --token "CLIENT_ID:CLIENT_SECRET" --robot-code "<robotCode>" --restart
-```
-
 ## 2. 渠道总览
 
 | 菜单项 | 渠道 | 插件来源 | 插件包 |
@@ -98,16 +80,17 @@
 
 ### 企业微信 WeCom（官方插件）
 - 插件：`@wecom/wecom-openclaw-plugin`
-- 当前安装器仅保留机器人模式（Webhook）
+- 当前安装器按官方插件要求配置 Bot ID + Secret
 - 关键配置结构：
-  - `channels.wecom.mode=bot`
-  - `channels.wecom.defaultAccount=bot`
-  - `channels.wecom.accounts.bot.*`
-- 机器人模式必填：
-  - `token`
-  - `encodingAESKey`
-  - `receiveId`
-  - `webhookPath`（默认 `/wecom/bot`）
+  - `channels.wecom.botId`
+  - `channels.wecom.secret`
+  - `channels.wecom.enabled`
+  - `channels.wecom.defaultAccount=default`
+  - `channels.wecom.accounts.default.botId`
+  - `channels.wecom.accounts.default.secret`
+- 必填：
+  - `botId`
+  - `secret`
 - 菜单路径：`[4]非官方消息渠道配置 -> [3]企业微信（WeCom，官方）`
 
 ### 非官方高级模型（Claude/GPT）与自动路由

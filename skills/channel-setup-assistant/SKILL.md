@@ -28,9 +28,7 @@ openclaw gateway restart
 - `appSecret`
 
 ### 企业微信 WeCom（官方插件）
-- 固定机器人模式（bot）
-- 必填：`token` `encodingAESKey` `receiveId`
-- 可选：`webhookPath`（默认 `/wecom/bot`）
+- 必填：`botId` `secret`
 
 ### 微信 WeChatPad（社区）
 - `proxyUrl`

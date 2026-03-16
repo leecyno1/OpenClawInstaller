@@ -117,7 +117,6 @@ WECHATPAD_CALLBACK_PATH_DEFAULT="${OPENCLAW_WECHATPAD_CALLBACK_PATH:-/api/callba
 # 企业微信插件策略（官方插件，机器人模式）
 WECOM_PLUGIN_OFFICIAL="@wecom/wecom-openclaw-plugin"
 WECOM_PLUGIN_OFFICIAL_VERSION_DEFAULT="${OPENCLAW_WECOM_PLUGIN_OFFICIAL_VERSION:-1.0.11}"
-WECOM_WEBHOOK_BOT_DEFAULT="${OPENCLAW_WECOM_WEBHOOK_BOT_PATH:-/wecom/bot}"
 # 钉钉社区插件策略（DingTalk）
 DINGTALK_PLUGIN_COMMUNITY="openclaw-channel-dingtalk"
 DINGTALK_PLUGIN_VERSION_DEFAULT="${OPENCLAW_DINGTALK_PLUGIN_VERSION:-2.2.2}"
@@ -4865,7 +4864,8 @@ probe_wecom_community_config() {
 
     local plugin_ok=false
     local channel_ok=false
-    local bot_token=""
+    local bot_id=""
+    local bot_secret=""
 
     if openclaw plugins list 2>/dev/null | grep -Eqi "wecom-openclaw-plugin|openclaw-wecom|wecom"; then
         plugin_ok=true
@@ -4881,11 +4881,18 @@ probe_wecom_community_config() {
         log_warn "WeCom 渠道未在 channels list 中出现"
     fi
 
-    bot_token="$(openclaw config get channels.wecom.accounts.bot.token 2>/dev/null || true)"
-    if [ -n "$bot_token" ] && [ "$bot_token" != "undefined" ]; then
-        log_info "机器人模式关键字段已配置"
+    bot_id="$(openclaw config get channels.wecom.botId 2>/dev/null || true)"
+    bot_secret="$(openclaw config get channels.wecom.secret 2>/dev/null || true)"
+    if [ -z "$bot_id" ] || [ "$bot_id" = "undefined" ]; then
+        bot_id="$(openclaw config get channels.wecom.accounts.default.botId 2>/dev/null || true)"
+    fi
+    if [ -z "$bot_secret" ] || [ "$bot_secret" = "undefined" ]; then
+        bot_secret="$(openclaw config get channels.wecom.accounts.default.secret 2>/dev/null || true)"
+    fi
+    if [ -n "$bot_id" ] && [ "$bot_id" != "undefined" ] && [ -n "$bot_secret" ] && [ "$bot_secret" != "undefined" ]; then
+        log_info "Bot ID / Secret 已配置"
     else
-        log_warn "机器人模式 token 未配置"
+        log_warn "Bot ID / Secret 未配置"
     fi
 
     echo ""
@@ -4958,15 +4965,13 @@ config_wecom_community_setup() {
     local plugin_official_version="${OPENCLAW_WECOM_PLUGIN_OFFICIAL_VERSION:-$WECOM_PLUGIN_OFFICIAL_VERSION_DEFAULT}"
     local plugin_spec_official="${WECOM_PLUGIN_OFFICIAL}@${plugin_official_version}"
 
-    local bot_webhook="$WECOM_WEBHOOK_BOT_DEFAULT"
-    local bot_token=""
-    local bot_aes=""
-    local bot_receive_id=""
+    local bot_id=""
+    local bot_secret=""
 
     echo -e "${YELLOW}⚠️ 提示:${NC}"
     echo "  • 企业微信固定使用官方插件（@wecom/wecom-openclaw-plugin）"
     echo "  • 本安装器默认使用仓库内本地插件包，避免慢速远程下载"
-    echo "  • 配置方式仅保留机器人模式（Webhook），不再配置开放应用模式"
+    echo "  • 配置方式仅保留 Bot ID + Secret（与官方文档一致）"
     echo ""
     echo -e "${CYAN}优先安装:${NC} ${WHITE}${plugin_spec_official}${NC}"
     if ! confirm "继续安装并配置企业微信插件？" "n"; then
@@ -4989,28 +4994,33 @@ config_wecom_community_setup() {
     openclaw channels add --channel wecom > /dev/null 2>&1 || true
 
     echo ""
-    echo -e "${CYAN}机器人模式参数:${NC}"
-    read_input "${YELLOW}WebhookPath（默认 ${bot_webhook}）: ${NC}" bot_webhook
-    bot_webhook="${bot_webhook:-$WECOM_WEBHOOK_BOT_DEFAULT}"
-    read_secret_input "${YELLOW}机器人 Token: ${NC}" bot_token
-    read_secret_input "${YELLOW}机器人 EncodingAESKey: ${NC}" bot_aes
-    read_input "${YELLOW}机器人 ReceiveId（aibotid）: ${NC}" bot_receive_id
-    if [ -z "$bot_token" ] || [ -z "$bot_aes" ] || [ -z "$bot_receive_id" ]; then
-        log_error "机器人模式参数不完整"
+    echo -e "${CYAN}企业微信 Bot 参数:${NC}"
+    read_input "${YELLOW}Bot ID（支持粘贴 BotID:Secret）: ${NC}" bot_id
+    if [[ "$bot_id" == *:* ]] && [ -z "$bot_secret" ]; then
+        bot_secret="${bot_id#*:}"
+        bot_id="${bot_id%%:*}"
+    fi
+    if [ -z "$bot_secret" ]; then
+        read_secret_input "${YELLOW}Bot Secret: ${NC}" bot_secret
+    fi
+    if [ -z "$bot_id" ] || [ -z "$bot_secret" ]; then
+        log_error "Bot ID / Secret 不能为空"
         return 1
     fi
 
     openclaw config set channels.wecom.enabled true > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.mode bot > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.defaultAccount bot > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.accounts.bot.mode bot > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.accounts.bot.webhookPath "$bot_webhook" > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.accounts.bot.token "$bot_token" > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.accounts.bot.encodingAESKey "$bot_aes" > /dev/null 2>&1 || true
-    openclaw config set channels.wecom.accounts.bot.receiveId "$bot_receive_id" > /dev/null 2>&1 || true
+    openclaw config set channels.wecom.botId "$bot_id" > /dev/null 2>&1 || true
+    openclaw config set channels.wecom.secret "$bot_secret" > /dev/null 2>&1 || true
+    # 与 OpenClaw 通用 channels 账户结构保持兼容，避免 accounts.default 缺失告警
+    openclaw config set channels.wecom.defaultAccount default > /dev/null 2>&1 || true
+    openclaw config set channels.wecom.accounts.default.enabled true > /dev/null 2>&1 || true
+    openclaw config set channels.wecom.accounts.default.botId "$bot_id" > /dev/null 2>&1 || true
+    openclaw config set channels.wecom.accounts.default.secret "$bot_secret" > /dev/null 2>&1 || true
 
-    # 清理历史开放应用配置，避免旧配置与机器人模式冲突
+    # 清理历史旧字段，避免与官方 Bot ID/Secret 模式冲突
     if openclaw config --help 2>/dev/null | grep -q "unset"; then
+        openclaw config unset channels.wecom.mode > /dev/null 2>&1 || true
+        openclaw config unset channels.wecom.accounts.bot > /dev/null 2>&1 || true
         openclaw config unset channels.wecom.accounts.app > /dev/null 2>&1 || true
     fi
 
