@@ -158,6 +158,8 @@ UNOFFICIAL_ROUTING_DEFAULT_FAILOVER="${OPENCLAW_UNOFFICIAL_ROUTING_FAILOVER:-1}"
 SKILL_PIP_PACKAGES_DEFAULT="duckduckgo-search akshare requests pyyaml pypdf pillow openpyxl python-pptx python-docx lxml defusedxml pdf2image"
 SKILL_PIP_PACKAGES="${OPENCLAW_SKILL_PIP_PACKAGES:-$SKILL_PIP_PACKAGES_DEFAULT}"
 SKILL_PIP_PACKAGES_FILE_REL="skills/requirements-runtime.txt"
+DEFAULT_CHANNEL_PLUGIN_BOOTSTRAP_STAMP="$CONFIG_DIR/.cache/default-channel-plugins.stamp"
+DEFAULT_CHANNEL_PLUGIN_BOOTSTRAP_VERSION="2026-03-16.1"
 UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE=0
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
@@ -3961,9 +3963,23 @@ bootstrap_unofficial_channels_prerequisites() {
         return 0
     fi
 
+    local stamp_file="$DEFAULT_CHANNEL_PLUGIN_BOOTSTRAP_STAMP"
+    local stamp_version=""
+    if [ -f "$stamp_file" ]; then
+        stamp_version="$(tr -d '\r\n[:space:]' < "$stamp_file" 2>/dev/null || true)"
+    fi
+
+    if [ "${OPENCLAW_FORCE_CHANNEL_PLUGIN_SYNC:-0}" != "1" ] && [ "$stamp_version" = "$DEFAULT_CHANNEL_PLUGIN_BOOTSTRAP_VERSION" ]; then
+        log_info "默认消息插件已同步，跳过重复安装（需重装请先执行: export OPENCLAW_FORCE_CHANNEL_PLUGIN_SYNC=1）"
+        return 0
+    fi
+
     echo ""
     log_info "进入非官方渠道配置前，正在同步仓库内默认消息插件..."
     install_default_official_plugins_local_bundle_only || true
+
+    mkdir -p "$(dirname "$stamp_file")" 2>/dev/null || true
+    echo "$DEFAULT_CHANNEL_PLUGIN_BOOTSTRAP_VERSION" > "$stamp_file" 2>/dev/null || true
 }
 
 config_unofficial_fallback_model() {
@@ -4631,15 +4647,58 @@ resolve_official_plugin_local_source() {
     return 1
 }
 
+plugin_exists_by_candidates() {
+    local plugin_spec="$1"
+    local enable_alias="${2:-}"
+    local slug
+    local pack_name
+    local candidate
+
+    slug="$(plugin_bundle_slug_from_spec "$plugin_spec")"
+    pack_name="$(plugin_bundle_pack_name_from_spec "$plugin_spec")"
+
+    for candidate in "$enable_alias" "$slug" "$pack_name"; do
+        [ -n "$candidate" ] || continue
+        if openclaw plugins info "$candidate" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+enable_plugin_by_candidates() {
+    local plugin_spec="$1"
+    local enable_alias="${2:-}"
+    local slug
+    local pack_name
+    local candidate
+
+    slug="$(plugin_bundle_slug_from_spec "$plugin_spec")"
+    pack_name="$(plugin_bundle_pack_name_from_spec "$plugin_spec")"
+
+    for candidate in "$enable_alias" "$slug" "$pack_name"; do
+        [ -n "$candidate" ] || continue
+        if openclaw plugins enable "$candidate" >/dev/null 2>&1; then
+            ensure_plugin_in_allow "$candidate" >/dev/null 2>&1 || true
+            return 0
+        fi
+    done
+    return 1
+}
+
 install_official_plugin_local_first() {
     local plugin_spec="$1"
     local enable_alias="${2:-}"
     local bundle_dir
     local local_source
 
-    # 1) 优先尝试仅启用（feishu/discord/whatsapp 等内置 stock 插件）
-    if [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1; then
-        ensure_plugin_in_allow "$enable_alias" || true
+    # 1) 优先尝试启用（内置插件或已安装插件）
+    if enable_plugin_by_candidates "$plugin_spec" "$enable_alias"; then
+        return 0
+    fi
+
+    # 已安装但当前不可启用时，避免重复安装导致每次进菜单都变慢
+    if plugin_exists_by_candidates "$plugin_spec" "$enable_alias"; then
         return 0
     fi
 
@@ -4650,7 +4709,7 @@ install_official_plugin_local_first() {
         local_source="$(resolve_official_plugin_local_source "$plugin_spec" "$bundle_dir" 2>/dev/null || true)"
         if [ -n "$local_source" ]; then
             if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
-                [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
+                enable_plugin_by_candidates "$plugin_spec" "$enable_alias" || true
                 return 0
             fi
             return 1
@@ -4660,7 +4719,7 @@ install_official_plugin_local_first() {
     # 3) 如显式允许远端兜底，则最后再尝试一次在线安装
     if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ]; then
         if openclaw plugins install "$plugin_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin_spec" >/dev/null 2>&1; then
-            [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
+            enable_plugin_by_candidates "$plugin_spec" "$enable_alias" || true
             return 0
         fi
     fi
