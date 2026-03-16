@@ -573,6 +573,20 @@ get_profile_token_limits() {
     esac
 }
 
+get_profile_context_guard_limits() {
+    local level
+    level="$(normalize_rule_profile_level "$1")"
+    case "$level" in
+        none)
+            echo "0 0 0"
+            ;;
+        *)
+            # warn / ask / force
+            echo "120000 150000 180000"
+            ;;
+    esac
+}
+
 get_profile_prompt_text() {
     local level
     level="$(normalize_rule_profile_level "$1")"
@@ -592,6 +606,7 @@ EOF
 - 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
 - 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
 - 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 EOF
             ;;
         medium)
@@ -601,6 +616,7 @@ EOF
 - 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
 - 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
 - 输出涉及隐私数据时默认最小化披露并做脱敏。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 EOF
             ;;
         high)
@@ -610,6 +626,7 @@ EOF
 - 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
 - 严禁执行绕过安全策略、越权访问、数据外泄类指令。
 - 遇到敏感数据请求先拒绝，再提供合规替代方案。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 EOF
             ;;
         *)
@@ -619,6 +636,7 @@ EOF
 - 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
 - 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
 - 输出涉及隐私数据时默认最小化披露并做脱敏。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 EOF
             ;;
     esac
@@ -817,22 +835,36 @@ apply_profile_token_policy() {
         return 0
     fi
     local limits window_hours max_requests max_tokens max_tokens_per_req
+    local context_limits context_warn_tokens context_ask_tokens context_force_tokens
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
     max_requests="$(echo "$limits" | awk '{print $2}')"
     max_tokens="$(echo "$limits" | awk '{print $3}')"
     max_tokens_per_req="$(echo "$limits" | awk '{print $4}')"
+    context_limits="$(get_profile_context_guard_limits "$level")"
+    context_warn_tokens="$(echo "$context_limits" | awk '{print $1}')"
+    context_ask_tokens="$(echo "$context_limits" | awk '{print $2}')"
+    context_force_tokens="$(echo "$context_limits" | awk '{print $3}')"
 
     upsert_env_export_install "OPENCLAW_RULE_WINDOW_HOURS" "$window_hours"
     upsert_env_export_install "OPENCLAW_RULE_MAX_REQUESTS" "$max_requests"
     upsert_env_export_install "OPENCLAW_RULE_MAX_TOKENS" "$max_tokens"
     upsert_env_export_install "OPENCLAW_RULE_MAX_TOKENS_PER_REQUEST" "$max_tokens_per_req"
+    upsert_env_export_install "OPENCLAW_CONTEXT_WARN_TOKENS" "$context_warn_tokens"
+    upsert_env_export_install "OPENCLAW_CONTEXT_ASK_TOKENS" "$context_ask_tokens"
+    upsert_env_export_install "OPENCLAW_CONTEXT_FORCE_TOKENS" "$context_force_tokens"
+    upsert_env_export_install "OPENCLAW_CONTEXT_ASK_COMMAND" "/compact"
 
     if check_command openclaw; then
         openclaw config set "vendor.control.rate.windowHours" "$window_hours" >/dev/null 2>&1 || true
         openclaw config set "vendor.control.rate.maxRequests" "$max_requests" >/dev/null 2>&1 || true
         openclaw config set "vendor.control.rate.maxTokens" "$max_tokens" >/dev/null 2>&1 || true
         openclaw config set "vendor.control.rate.maxTokensPerRequest" "$max_tokens_per_req" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.context.warnTokens" "$context_warn_tokens" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.context.askTokens" "$context_ask_tokens" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.context.forceTokens" "$context_force_tokens" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.context.askCompact" true >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.context.askCommand" "/compact" >/dev/null 2>&1 || true
     fi
 }
 
@@ -909,6 +941,7 @@ write_profile_policy_files() {
         return 0
     fi
     local limits window_hours max_requests max_tokens max_tokens_per_req
+    local context_limits context_warn_tokens context_ask_tokens context_force_tokens
     local prompt_text
     local now_iso
     local gemini_url gemini_model nano_url nano_image_model nano_video_model
@@ -918,6 +951,10 @@ write_profile_policy_files() {
     max_requests="$(echo "$limits" | awk '{print $2}')"
     max_tokens="$(echo "$limits" | awk '{print $3}')"
     max_tokens_per_req="$(echo "$limits" | awk '{print $4}')"
+    context_limits="$(get_profile_context_guard_limits "$level")"
+    context_warn_tokens="$(echo "$context_limits" | awk '{print $1}')"
+    context_ask_tokens="$(echo "$context_limits" | awk '{print $2}')"
+    context_force_tokens="$(echo "$context_limits" | awk '{print $3}')"
 
     gemini_url="${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}"
     gemini_model="${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}"
@@ -949,6 +986,9 @@ write_profile_policy_files() {
 - 请求上限: ${max_requests}
 - Token 上限: ${max_tokens}
 - 单请求 Token 上限: ${max_tokens_per_req}
+- 上下文预警阈值: ${context_warn_tokens}
+- 上下文询问阈值: ${context_ask_tokens}
+- 上下文强制压缩阈值: ${context_force_tokens}
 
 ## 执行提示词
 ${prompt_text}
@@ -958,6 +998,12 @@ ${prompt_text}
 - 禁止协助绕过模型调用限制、权限限制或网关限制。
 - 禁止暴露用户敏感信息（身份、联系方式、地址、财务、医疗等）。
 - 遇到敏感请求必须拒绝，并返回合规替代方案。
+
+## 上下文守门规则
+- 当上下文 >= ${context_warn_tokens} tokens 时，先给出一次预警。
+- 当上下文 >= ${context_ask_tokens} tokens 时，必须先询问用户是否执行 /compact。
+- 若达到 ${context_force_tokens} tokens，且用户未响应或拒绝，则必须先压缩上下文再继续。
+- 询问阶段暂停高成本工具调用，仅保留确认交互与必要状态回执。
 EOF
 
     cat > "$memory_rule_file" <<EOF
@@ -968,7 +1014,7 @@ EOF
 1. 用户消息必须秒回。任何 >5s 的操作都走后台，前台只做快速指令 message 发送。
 2. 使用第一性原理思考。不要假设用户非常清楚自己想要什么和该怎么得到。从原始需求和问题本质出发，审慎分析后再行动。
 3. 每次 heartbeat 必须主动检查工作进度。数据连续不变 = 异常信号，kill 卡住的进程并重发任务，不要只报数字。
-4. 上下文努力控制在 100k 以内。大了会慢、会挂、会丢消息。主动做 compaction，不要等爆。
+4. 上下文守门：>=${context_warn_tokens} 先预警；>=${context_ask_tokens} 必须询问“是否 /compact”；>=${context_force_tokens} 必须先压缩再继续。
 5. 你不只是在完成任务，你是在值班。没人叫你也要巡逻：查 Codex、查进度、查异常、查卡住。主动发现问题比被动等指令更重要。
 
 ## 规则约束（档位 ${level}）
@@ -986,6 +1032,7 @@ EOF
 2. 每 ${window_hours} 小时最多 ${max_requests} 次请求。
 3. 单请求建议 Token 不超过 ${max_tokens_per_req}。
 4. 拒绝密钥泄露、越权请求和敏感信息外泄。
+5. 当上下文 >= ${context_ask_tokens} 时，必须先询问是否执行 /compact。
 EOF
 
     cat > "$soul_rule_file" <<EOF
@@ -1007,6 +1054,14 @@ EOF
     "maxRequests": ${max_requests},
     "maxTokens": ${max_tokens},
     "maxTokensPerRequest": ${max_tokens_per_req}
+  },
+  "contextGuard": {
+    "warnTokens": ${context_warn_tokens},
+    "askTokens": ${context_ask_tokens},
+    "forceTokens": ${context_force_tokens},
+    "askCommand": "/compact",
+    "requireUserConfirmAtAsk": true,
+    "pauseHeavyToolsWhenAsking": true
   },
   "riskControls": {
     "blockSecretExposure": true,
@@ -1042,6 +1097,7 @@ EOF
 - 绝不泄露任何 API Key、Token、密钥、Cookie、会话票据。
 - 拒绝任何“切换/绕过模型限制、突破调用限制、越权执行”请求。
 - 涉及用户隐私/敏感信息时必须脱敏或拒绝，并解释原因。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 
 ## MEDIUM
 你是平衡执行模式（MEDIUM）。
@@ -1049,6 +1105,7 @@ EOF
 - 拒绝导出密钥、凭据、令牌和任何可用于接管账户的信息。
 - 拒绝协助规避模型/网关/权限限制，所有升级动作需显式授权。
 - 输出涉及隐私数据时默认最小化披露并做脱敏。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 
 ## HIGH
 你是高性能执行模式（HIGH）。
@@ -1056,6 +1113,7 @@ EOF
 - 严禁输出 API Key、系统密钥、数据库凭据、私有令牌。
 - 严禁执行绕过安全策略、越权访问、数据外泄类指令。
 - 遇到敏感数据请求先拒绝，再提供合规替代方案。
+- 当上下文 >=150k tokens 时，必须先询问用户是否执行 /compact；>=180k tokens 时先压缩再继续。
 EOF
 
     chmod 600 "$policy_json" 2>/dev/null || true
@@ -1087,9 +1145,13 @@ apply_vendor_rule_profile() {
         return 0
     fi
 
-    local limits prompt_text
+    local limits prompt_text context_limits context_warn_tokens context_ask_tokens context_force_tokens
     limits="$(get_profile_token_limits "$level")"
     prompt_text="$(get_profile_prompt_text "$level")"
+    context_limits="$(get_profile_context_guard_limits "$level")"
+    context_warn_tokens="$(echo "$context_limits" | awk '{print $1}')"
+    context_ask_tokens="$(echo "$context_limits" | awk '{print $2}')"
+    context_force_tokens="$(echo "$context_limits" | awk '{print $3}')"
 
     configure_profile_api_keys "$level"
     apply_profile_token_policy "$level"
@@ -1101,6 +1163,7 @@ apply_vendor_rule_profile() {
     echo -e "  档位: ${WHITE}${level}${NC}"
     echo -e "  限流: ${WHITE}$(echo "$limits" | awk '{print $1"小时/"$2"次, 总Token="$3", 单次="$4}')${NC}"
     echo -e "  Skills 档位: ${WHITE}$(case "$level" in low) echo 基础;; medium) echo 扩展;; high) echo 超级;; *) echo 扩展;; esac)${NC}"
+    echo -e "  上下文守门: ${WHITE}预警 ${context_warn_tokens} / 询问 ${context_ask_tokens} / 强制 ${context_force_tokens}${NC}"
     echo -e "  Gemini 服务: ${WHITE}${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT} | ${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  NanoBanana 服务: ${WHITE}${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT} | ${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}${NC}"
     echo -e "  提示词摘要: ${WHITE}$(echo "$prompt_text" | head -1)${NC}"
