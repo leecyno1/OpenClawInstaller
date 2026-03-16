@@ -86,6 +86,7 @@ CURL_CONNECT_TIMEOUT="${OPENCLAW_CURL_CONNECT_TIMEOUT:-8}"
 CURL_MAX_TIME="${OPENCLAW_CURL_MAX_TIME:-30}"
 GATEWAY_HOST="${OPENCLAW_GATEWAY_HOST:-127.0.0.1}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-13145}"
+RESET_CHAT_AFTER_INSTALL="${OPENCLAW_RESET_CHAT_AFTER_INSTALL:-1}"
 AUTO_SWAP_ENABLE="${OPENCLAW_AUTO_SWAP:-1}"
 SWAP_PERSIST_ENABLE="${OPENCLAW_SWAP_PERSIST:-1}"
 SWAP_THRESHOLD_MB="${OPENCLAW_SWAP_THRESHOLD_MB:-4096}"
@@ -305,6 +306,8 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --verbose                            详细日志
   --gateway-host <host>               Gateway 监听地址 (默认: 127.0.0.1)
   --gateway-port <port>               Gateway 监听端口 (默认: 13145)
+  --reset-chat-history                安装后重置聊天历史 (默认开启)
+  --keep-chat-history                 安装后保留历史聊天记录
   --rule-profile <low|medium|high|none> token规划规则档位 (默认: medium)
   --help, -h                           显示帮助
 
@@ -324,6 +327,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_CURL_MAX_TIME=<seconds>
   OPENCLAW_GATEWAY_HOST=<默认127.0.0.1>
   OPENCLAW_GATEWAY_PORT=<默认13145>
+  OPENCLAW_RESET_CHAT_AFTER_INSTALL=0|1
   OPENCLAW_AUTO_SWAP=0|1
   OPENCLAW_SWAP_PERSIST=0|1
   OPENCLAW_SWAP_THRESHOLD_MB=<默认4096>
@@ -400,6 +404,14 @@ parse_args() {
             --gateway-port)
                 GATEWAY_PORT="$2"
                 shift 2
+                ;;
+            --reset-chat-history)
+                RESET_CHAT_AFTER_INSTALL=1
+                shift
+                ;;
+            --keep-chat-history)
+                RESET_CHAT_AFTER_INSTALL=0
+                shift
                 ;;
             --rule-profile)
                 RULE_PROFILE_SELECTED="$2"
@@ -514,6 +526,16 @@ normalize_rule_profile_level() {
         h) echo "high" ;;
         n|no|skip|off) echo "none" ;;
         *) echo "medium" ;;
+    esac
+}
+
+normalize_bool_flag() {
+    local value
+    value="$(echo "${1:-0}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    case "$value" in
+        1|y|yes|true|on|enable|enabled) echo "1" ;;
+        0|n|no|false|off|disable|disabled) echo "0" ;;
+        *) echo "${2:-0}" ;;
     esac
 }
 
@@ -1116,6 +1138,8 @@ normalize_install_options() {
     fi
     export OPENCLAW_GATEWAY_HOST="$GATEWAY_HOST"
     export OPENCLAW_GATEWAY_PORT="$GATEWAY_PORT"
+    RESET_CHAT_AFTER_INSTALL="$(normalize_bool_flag "$RESET_CHAT_AFTER_INSTALL" "1")"
+    export OPENCLAW_RESET_CHAT_AFTER_INSTALL="$RESET_CHAT_AFTER_INSTALL"
     RULE_PROFILE_SELECTED="$(normalize_rule_profile_level "$RULE_PROFILE_SELECTED")"
 }
 
@@ -1131,6 +1155,7 @@ print_install_plan() {
     echo "  - verbose: $VERBOSE"
     echo "  - gateway_host: $GATEWAY_HOST"
     echo "  - gateway_port: $GATEWAY_PORT"
+    echo "  - reset_chat_after_install: $RESET_CHAT_AFTER_INSTALL"
     echo "  - rule_profile: $RULE_PROFILE_SELECTED"
     if [ "$INSTALL_METHOD" = "git" ]; then
         echo "  - git_dir: $GIT_DIR"
@@ -2114,7 +2139,7 @@ install_default_official_plugins() {
 
     cleanup_stale_plugin_state
 
-    log_step "同步默认消息渠道插件集（优先启用内置，其次使用仓库本地包）..."
+    log_step "同步默认消息渠道插件集（优先官方源，其次仓库本地包）..."
     local ok=0
     local fail=0
     local builtins_ok=0
@@ -2124,13 +2149,20 @@ install_default_official_plugins() {
         spec="$plugin"
         plugin_alias="$(plugin_enable_alias_from_spec_install "$spec")"
 
-        # 1) 先尝试仅启用（针对 feishu/discord/whatsapp 这类内置 stock 插件）
+        # 1) 先尝试启用（针对已安装/内置插件）
         if openclaw plugins enable "$plugin_alias" >/dev/null 2>&1; then
             ok=$((ok + 1))
             continue
         fi
 
-        # 2) 启用失败时再尝试从仓库本地包安装
+        # 2) 优先尝试官方源安装
+        if openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1; then
+            openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
+            ok=$((ok + 1))
+            continue
+        fi
+
+        # 3) 官方源失败时再尝试从仓库本地包安装
         local_source="$(resolve_official_plugin_local_source_install "$spec" "$bundle_dir" 2>/dev/null || true)"
         if [ -n "$local_source" ]; then
             if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
@@ -2142,7 +2174,7 @@ install_default_official_plugins() {
             continue
         fi
 
-        # 3) 如显式允许远端兜底，则最后再尝试一次在线安装
+        # 4) 如显式允许远端兜底，则最后再尝试一次在线安装
         if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && \
            (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
             openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
@@ -3807,6 +3839,48 @@ EOF
     return 0
 }
 
+reset_gateway_chat_history_for_fresh_start() {
+    if [ "$NO_PROMPT" != "1" ] && [ "$TTY_INPUT" != "/dev/null" ]; then
+        local default_answer="y"
+        [ "$RESET_CHAT_AFTER_INSTALL" = "0" ] && default_answer="n"
+        echo ""
+        echo -e "${CYAN}聊天历史处理${NC}"
+        echo -e "${GRAY}说明: 仅清理会话聊天记录，不删除 API Key、插件与渠道安装包。${NC}"
+        if confirm "安装完成后是否清理历史会话（进入 Gateway 像首次使用）？" "$default_answer"; then
+            RESET_CHAT_AFTER_INSTALL="1"
+        else
+            RESET_CHAT_AFTER_INSTALL="0"
+        fi
+    fi
+
+    upsert_env_export_install "OPENCLAW_RESET_CHAT_AFTER_INSTALL" "$RESET_CHAT_AFTER_INSTALL"
+    if [ "$RESET_CHAT_AFTER_INSTALL" != "1" ]; then
+        log_info "已保留历史聊天记录（OPENCLAW_RESET_CHAT_AFTER_INSTALL=0）"
+        return 0
+    fi
+
+    log_step "重置 Gateway 聊天历史（保留配置与插件）..."
+    local session_dir="$CONFIG_DIR/agents/main/sessions"
+    local keep_rule_file="$session_dir/vendor-control-session.md"
+    local session_state_file="$CONFIG_DIR/agents/main/agent/SESSION-STATE.md"
+
+    if check_command openclaw; then
+        openclaw sessions cleanup >/dev/null 2>&1 || true
+    fi
+
+    if [ -d "$session_dir" ]; then
+        if [ -f "$keep_rule_file" ]; then
+            find "$session_dir" -mindepth 1 ! -path "$keep_rule_file" -exec rm -rf {} + 2>/dev/null || true
+        else
+            find "$session_dir" -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+        fi
+    fi
+
+    rm -f "$session_state_file" 2>/dev/null || true
+    log_info "聊天历史已重置；下次进入将以新会话显示欢迎语。"
+    return 0
+}
+
 
 # ================================ 服务管理 ================================
 
@@ -4132,7 +4206,7 @@ main() {
         exit 1
     fi
     cleanup_stale_plugin_state
-    if ! run_step_with_auto_fix "同步默认消息渠道插件（本地仓库）" install_default_official_plugins; then
+    if ! run_step_with_auto_fix "同步默认消息渠道插件（官方优先+本地兜底）" install_default_official_plugins; then
         log_warn "默认消息渠道插件同步未完全成功，可稍后在配置菜单中重试。"
     fi
     if [ "$NO_ONBOARD" = "1" ]; then
@@ -4145,6 +4219,7 @@ main() {
     setup_identity
     apply_vendor_rule_profile
     apply_default_security_baseline
+    reset_gateway_chat_history_for_fresh_start
     if ! run_step_with_auto_fix "设置开机守护进程" setup_daemon; then
         log_error "守护进程设置失败"
         exit 1

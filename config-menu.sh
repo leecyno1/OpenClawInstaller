@@ -3945,7 +3945,7 @@ install_default_official_plugins_local_bundle_only() {
         fi
     done
 
-    log_info "非官方渠道预置消息插件完成：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
+    log_info "非官方渠道预置消息插件完成（官方优先+本地兜底）：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
     return 0
 }
 
@@ -4695,12 +4695,13 @@ install_official_plugin_local_first() {
         return 0
     fi
 
-    # 已安装但当前不可启用时，避免重复安装导致每次进菜单都变慢
-    if plugin_exists_by_candidates "$plugin_spec" "$enable_alias"; then
+    # 2) 官方源优先安装
+    if openclaw plugins install "$plugin_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin_spec" >/dev/null 2>&1; then
+        enable_plugin_by_candidates "$plugin_spec" "$enable_alias" || true
         return 0
     fi
 
-    # 2) 再尝试从仓库本地包安装
+    # 3) 官方源失败后，回退到仓库本地包
     bundle_dir="$(resolve_official_plugins_bundle_dir 2>/dev/null || true)"
 
     if [ -n "$bundle_dir" ]; then
@@ -4711,14 +4712,6 @@ install_official_plugin_local_first() {
                 return 0
             fi
             return 1
-        fi
-    fi
-
-    # 3) 如显式允许远端兜底，则最后再尝试一次在线安装
-    if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ]; then
-        if openclaw plugins install "$plugin_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin_spec" >/dev/null 2>&1; then
-            enable_plugin_by_candidates "$plugin_spec" "$enable_alias" || true
-            return 0
         fi
     fi
 
@@ -6741,7 +6734,7 @@ manage_official_plugins() {
     fi
 
     print_menu_item "1" "查看当前插件列表" "📋"
-    print_menu_item "2" "安装默认消息插件集（本地包）" "📦"
+    print_menu_item "2" "安装默认消息插件集（官方优先+本地兜底）" "📦"
     print_menu_item "3" "更新全部插件" "⬆️"
     print_menu_item "4" "跳转官方 Skills 设置" "🚀"
     print_menu_item "0" "返回上级菜单" "↩️"
@@ -8393,11 +8386,12 @@ reset_openclaw_to_factory_state() {
     echo -e "${YELLOW}该操作将清空以下内容：${NC}"
     echo "  - 所有 API Key / Secret / Token（env 与配置）"
     echo "  - 消息渠道配置与配对数据（channels / pairing / credentials）"
+    echo "  - 插件适配配置（plugins.allow / plugins.entries / 社区路由）"
     echo "  - 身份人设、token规划规则注入、非官方模型路由等运行配置"
     echo ""
     echo -e "${CYAN}保留内容：${NC}"
     echo "  - 已安装的 OpenClaw 程序"
-    echo "  - skills 与 plugins 目录文件"
+    echo "  - skills 与 plugins 目录文件（仅重置配置，不删除文件）"
     echo ""
 
     if ! confirm "确认执行一键重置？" "n"; then
@@ -8468,10 +8462,14 @@ reset_openclaw_to_factory_state() {
         openclaw config unset plugins.community >/dev/null 2>&1 || true
         openclaw config unset identity >/dev/null 2>&1 || true
         openclaw config unset vendor.control >/dev/null 2>&1 || true
+        cleanup_stale_plugin_state_menu || true
+        if ! install_default_official_plugins_menu; then
+            log_warn "默认消息插件重建未完全成功，请稍后在“官方消息插件管理”中重试。"
+        fi
     fi
 
     echo ""
-    log_info "一键重置完成（已恢复到初始化状态）"
+    log_info "一键重置完成（已恢复到初始化状态，插件运行配置已重建）"
     echo -e "  备份目录: ${WHITE}${backup_dir}${NC}"
     echo -e "  网关保留: ${WHITE}${gateway_host}:${gateway_port}${NC}"
     echo ""
