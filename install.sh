@@ -2084,6 +2084,7 @@ cleanup_stale_plugin_state() {
         # 清理已知的陈旧插件配置项，避免 Config warnings
         openclaw config unset "plugins.entries.gemini" >/dev/null 2>&1 || true
         openclaw config unset "plugins.entries.nano-banana-pro" >/dev/null 2>&1 || true
+        openclaw config unset "plugins.entries.openclaw-channel-dingtalk" >/dev/null 2>&1 || true
     fi
 
     # 清理历史飞书社区扩展目录，避免与官方 feishu 插件重复加载

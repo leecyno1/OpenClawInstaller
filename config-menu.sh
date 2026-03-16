@@ -5755,6 +5755,7 @@ cleanup_stale_plugin_state_menu() {
     if check_openclaw_installed; then
         openclaw config unset "plugins.entries.gemini" >/dev/null 2>&1 || true
         openclaw config unset "plugins.entries.nano-banana-pro" >/dev/null 2>&1 || true
+        openclaw config unset "plugins.entries.openclaw-channel-dingtalk" >/dev/null 2>&1 || true
     fi
 
     local legacy_dir
