@@ -167,10 +167,11 @@ export OPENCLAW_OFFICIAL_INSTALL_MIRROR_URL="https://your-mirror.example.com/ope
 
 1. 系统与依赖检查
 2. OpenClaw 安装
-3. AI 模型向导配置
-4. API 连通性验证
-5. 可选启动 Gateway
-6. 可选进入配置菜单
+3. 默认 Skills 运行依赖安装（Python 包、`uvx`、MiniMax MCP 组件）
+4. AI 模型向导配置
+5. API 连通性验证
+6. 可选启动 Gateway
+7. 可选进入配置菜单
 
 Gateway 默认监听地址已调整为：`127.0.0.1:13145`（本地回环，避免沿用常见默认端口）。
 
@@ -225,6 +226,7 @@ bash ./config-menu.sh
 - `[3]` 官方消息渠道插件（官方流程）
 - `[4]` 非官方消息渠道配置（社区插件：微信/QQ/企业微信/钉钉等）
 - `[6]` Skills 管理（官方插件管理 / 增强插件管理 / 超级插件管理 / 默认技能包同步）
+- `[6]` Skills 管理 → `[9]` 安装/修复 Skills 运行依赖
 - `[7]` 快速测试
 - `[8]` 高级设置（升级、备份、恢复）
 - `[8]` 高级设置 → `[8]` AI 自动修复 OpenClaw（集成 `auto-fix-openclaw`，支持 Codex/Claude CLI）
@@ -282,6 +284,18 @@ auto-install-Openclaw 当前推荐配置模型：
 
 ```bash
 export OPENCLAW_SKILLS_FORCE_UPDATE=1
+```
+
+如需跳过自动安装 Skills 运行依赖（默认开启）：
+
+```bash
+export OPENCLAW_INSTALL_SKILL_DEPS=0
+```
+
+依赖清单存放在仓库内：
+
+```text
+skills/requirements-runtime.txt
 ```
 
 当前默认打包技能：
