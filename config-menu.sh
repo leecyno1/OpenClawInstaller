@@ -155,6 +155,9 @@ UNOFFICIAL_ADVANCED_DEFAULT_MODEL_CLAUDE="${OPENCLAW_UNOFFICIAL_ADVANCED_CLAUDE_
 UNOFFICIAL_ADVANCED_DEFAULT_MODEL_GPT="${OPENCLAW_UNOFFICIAL_ADVANCED_GPT_MODEL:-gpt-5.1-codex}"
 UNOFFICIAL_ROUTING_DEFAULT_STRATEGY="${OPENCLAW_UNOFFICIAL_ROUTING_STRATEGY:-auto}"
 UNOFFICIAL_ROUTING_DEFAULT_FAILOVER="${OPENCLAW_UNOFFICIAL_ROUTING_FAILOVER:-1}"
+SKILL_PIP_PACKAGES_DEFAULT="duckduckgo-search akshare requests pyyaml pypdf pillow openpyxl python-pptx python-docx lxml defusedxml pdf2image"
+SKILL_PIP_PACKAGES="${OPENCLAW_SKILL_PIP_PACKAGES:-$SKILL_PIP_PACKAGES_DEFAULT}"
+SKILL_PIP_PACKAGES_FILE_REL="skills/requirements-runtime.txt"
 UNOFFICIAL_CHANNELS_BOOTSTRAP_DONE=0
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
@@ -1028,7 +1031,16 @@ EOF
     cat > "$memory_rule_file" <<EOF
 # 厂商控制规则（Memory 注入）
 
-记忆要求：
+## 运行基线（初始化）
+
+1. 用户消息必须秒回。任何 >5s 的操作都走后台，前台只做快速指令 message 发送。
+2. 使用第一性原理思考。不要假设用户非常清楚自己想要什么和该怎么得到。从原始需求和问题本质出发，审慎分析后再行动。
+3. 每次 heartbeat 必须主动检查工作进度。数据连续不变 = 异常信号，kill 卡住的进程并重发任务，不要只报数字。
+4. 上下文努力控制在 100k 以内。大了会慢、会挂、会丢消息。主动做 compaction，不要等爆。
+5. 你不只是在完成任务，你是在值班。没人叫你也要巡逻：查 Codex、查进度、查异常、查卡住。主动发现问题比被动等指令更重要。
+
+## 规则约束（档位 ${level}）
+
 - 始终遵循档位 ${level} 的预算控制。
 - 当预算接近上限时先返回摘要与下一步建议，避免超限。
 - 不记录或复述明文密钥与敏感凭据。
@@ -4625,10 +4637,14 @@ install_official_plugin_local_first() {
     local bundle_dir
     local local_source
 
-    if ! bundle_dir="$(resolve_official_plugins_bundle_dir 2>/dev/null)"; then
-        log_warn "未找到官方插件本地包目录（plugins/official）"
-        bundle_dir=""
+    # 1) 优先尝试仅启用（feishu/discord/whatsapp 等内置 stock 插件）
+    if [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1; then
+        ensure_plugin_in_allow "$enable_alias" || true
+        return 0
     fi
+
+    # 2) 再尝试从仓库本地包安装
+    bundle_dir="$(resolve_official_plugins_bundle_dir 2>/dev/null || true)"
 
     if [ -n "$bundle_dir" ]; then
         local_source="$(resolve_official_plugin_local_source "$plugin_spec" "$bundle_dir" 2>/dev/null || true)"
@@ -4637,12 +4653,11 @@ install_official_plugin_local_first() {
                 [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
                 return 0
             fi
-            log_warn "本地官方插件包安装失败: $plugin_spec -> $local_source"
-        else
-            log_warn "仓库中缺少官方插件本地包: $plugin_spec"
+            return 1
         fi
     fi
 
+    # 3) 如显式允许远端兜底，则最后再尝试一次在线安装
     if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ]; then
         if openclaw plugins install "$plugin_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$plugin_spec" >/dev/null 2>&1; then
             [ -n "$enable_alias" ] && openclaw plugins enable "$enable_alias" >/dev/null 2>&1 || true
@@ -6862,6 +6877,110 @@ manage_enhanced_skills() {
     manage_enhanced_skills
 }
 
+pip_install_skill_dep_menu() {
+    local pkg="$1"
+    local log_file
+    log_file="$(mktemp /tmp/openclaw-pip-install.XXXXXX.log)"
+
+    if python3 -m pip install --user --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if python3 -m pip install --user --break-system-packages --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if python3 -m pip install --break-system-packages --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+
+    log_warn "依赖安装失败: $pkg"
+    tail -n 6 "$log_file" 2>/dev/null | sed 's/^/  /'
+    rm -f "$log_file" 2>/dev/null || true
+    return 1
+}
+
+resolve_skill_pip_packages_menu() {
+    local script_dir req_file line pkgs
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    req_file="$script_dir/$SKILL_PIP_PACKAGES_FILE_REL"
+
+    if [ -f "$req_file" ]; then
+        pkgs=""
+        while IFS= read -r line; do
+            line="$(echo "$line" | sed 's/#.*$//' | xargs)"
+            [ -n "$line" ] || continue
+            pkgs="$pkgs $line"
+        done < "$req_file"
+        echo "$pkgs" | xargs
+        return 0
+    fi
+    echo "$SKILL_PIP_PACKAGES"
+}
+
+install_skill_runtime_dependencies_menu() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🛠️ Skills 运行依赖安装/修复${NC}"
+    print_divider
+    echo ""
+    local packages
+    packages="$(resolve_skill_pip_packages_menu)"
+    echo -e "${CYAN}将补齐默认 Skills 依赖：python 包 + uvx + minimax-coding-plan-mcp${NC}"
+    echo -e "${GRAY}依赖列表: ${packages}${NC}"
+    echo ""
+
+    if ! confirm "确认开始安装/修复依赖？" "y"; then
+        log_info "已取消"
+        return 0
+    fi
+
+    local ok=0 fail=0 pkg
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_warn "未检测到 python3，尝试安装..."
+        case "$OS" in
+            ubuntu|debian) run_with_optional_sudo apt-get update >/dev/null 2>&1 || true; run_with_optional_sudo apt-get install -y python3 python3-pip poppler-utils >/dev/null 2>&1 || true ;;
+            centos|rhel|fedora) run_with_optional_sudo yum install -y python3 python3-pip poppler-utils >/dev/null 2>&1 || run_with_optional_sudo yum install -y python3 python3-pip >/dev/null 2>&1 || true ;;
+            macos) command -v brew >/dev/null 2>&1 && brew install python poppler >/dev/null 2>&1 || true ;;
+        esac
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1 || ! python3 -m pip --version >/dev/null 2>&1; then
+        log_error "python3/pip 不可用，无法继续安装 skills Python 依赖"
+        return 1
+    fi
+
+    for pkg in $packages; do
+        if pip_install_skill_dep_menu "$pkg"; then
+            ok=$((ok + 1))
+        else
+            fail=$((fail + 1))
+        fi
+    done
+
+    if command -v uvx >/dev/null 2>&1; then
+        if uvx minimax-coding-plan-mcp --help >/dev/null 2>&1 || uvx install minimax-coding-plan-mcp >/dev/null 2>&1; then
+            log_info "MiniMax MCP 依赖就绪"
+        else
+            log_warn "MiniMax MCP 自动安装失败，请稍后手动执行: uvx install minimax-coding-plan-mcp"
+        fi
+    else
+        log_warn "未检测到 uvx，MiniMax Web Search 可能不可用"
+    fi
+
+    export PATH="$HOME/.local/bin:$PATH"
+    hash -r 2>/dev/null || true
+
+    echo ""
+    log_info "依赖修复完成：成功 ${ok}，失败 ${fail}"
+    if [ "$fail" -gt 0 ]; then
+        log_warn "部分依赖安装失败，可重试本菜单项"
+    fi
+    return 0
+}
+
 manage_skills() {
     clear_screen
     print_header
@@ -6877,9 +6996,10 @@ manage_skills() {
     print_menu_item "6" "超级插件管理" "🚀"
     print_menu_item "7" "从本地目录添加 Skill" "➕"
     print_menu_item "8" "删除已安装 Skill" "🗑️"
+    print_menu_item "9" "安装/修复 Skills 运行依赖" "🛠️"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
-    read_input "${YELLOW}请选择 [0-8]: ${NC}" skills_choice
+    read_input "${YELLOW}请选择 [0-9]: ${NC}" skills_choice
 
     case "$skills_choice" in
         1)
@@ -6907,6 +7027,9 @@ manage_skills() {
             ;;
         8)
             remove_installed_skill
+            ;;
+        9)
+            install_skill_runtime_dependencies_menu
             ;;
         0)
             return
@@ -7394,6 +7517,39 @@ PYEOF
     fi
 }
 
+write_minimax_skill_config_menu() {
+    local api_key="$1"
+    [ -n "$api_key" ] || return 0
+
+    local cfg_dir="$CONFIG_DIR/config"
+    local cfg_file="$cfg_dir/minimax.json"
+    local output_path="$CONFIG_DIR/workspace/minimax-output"
+
+    mkdir -p "$cfg_dir" "$output_path" 2>/dev/null || true
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - <<PYEOF
+import json, os
+cfg_file = os.path.expanduser("$cfg_file")
+payload = {
+    "api_key": "$api_key",
+    "output_path": "~/.openclaw/workspace/minimax-output"
+}
+os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
+with open(cfg_file, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+PYEOF
+    else
+        cat > "$cfg_file" <<EOF
+{
+  "api_key": "$api_key",
+  "output_path": "~/.openclaw/workspace/minimax-output"
+}
+EOF
+    fi
+    chmod 600 "$cfg_file" 2>/dev/null || true
+}
+
 # 保存 AI 配置到 OpenClaw 环境变量
 # 参数: provider api_key model base_url [api_type]
 save_openclaw_ai_config() {
@@ -7408,62 +7564,76 @@ save_openclaw_ai_config() {
     local env_file="$OPENCLAW_ENV"
     local config_file="$OPENCLAW_JSON"
     
-    # 创建或更新环境变量文件
-    cat > "$env_file" << EOF
+    # 首次创建环境变量文件，后续采用增量更新避免覆盖其他 Provider Key
+    if [ ! -f "$env_file" ]; then
+        cat > "$env_file" << EOF
 # OpenClaw 环境变量配置
 # 由配置菜单自动生成: $(date '+%Y-%m-%d %H:%M:%S')
 EOF
+    fi
 
     # 根据 provider 设置对应的环境变量
     case "$provider" in
         anthropic)
-            echo "export ANTHROPIC_API_KEY=$api_key" >> "$env_file"
-            [ -n "$base_url" ] && echo "export ANTHROPIC_BASE_URL=$base_url" >> "$env_file"
+            upsert_env_export "ANTHROPIC_API_KEY" "$api_key"
+            [ -n "$base_url" ] && upsert_env_export "ANTHROPIC_BASE_URL" "$base_url" || remove_env_export "ANTHROPIC_BASE_URL"
             ;;
         openai)
-            echo "export OPENAI_API_KEY=$api_key" >> "$env_file"
-            [ -n "$base_url" ] && echo "export OPENAI_BASE_URL=$base_url" >> "$env_file"
+            upsert_env_export "OPENAI_API_KEY" "$api_key"
+            [ -n "$base_url" ] && upsert_env_export "OPENAI_BASE_URL" "$base_url" || remove_env_export "OPENAI_BASE_URL"
             ;;
         deepseek)
-            echo "export DEEPSEEK_API_KEY=$api_key" >> "$env_file"
-            echo "export DEEPSEEK_BASE_URL=${base_url:-https://api.deepseek.com}" >> "$env_file"
+            upsert_env_export "DEEPSEEK_API_KEY" "$api_key"
+            upsert_env_export "DEEPSEEK_BASE_URL" "${base_url:-https://api.deepseek.com}"
             ;;
         moonshot|kimi)
-            echo "export MOONSHOT_API_KEY=$api_key" >> "$env_file"
-            echo "export MOONSHOT_BASE_URL=${base_url:-https://api.moonshot.ai/v1}" >> "$env_file"
+            upsert_env_export "MOONSHOT_API_KEY" "$api_key"
+            upsert_env_export "MOONSHOT_BASE_URL" "${base_url:-https://api.moonshot.ai/v1}"
             ;;
         google|google-gemini-cli|google-antigravity)
-            echo "export GOOGLE_API_KEY=$api_key" >> "$env_file"
-            [ -n "$base_url" ] && echo "export GOOGLE_BASE_URL=$base_url" >> "$env_file"
+            upsert_env_export "GOOGLE_API_KEY" "$api_key"
+            [ -n "$base_url" ] && upsert_env_export "GOOGLE_BASE_URL" "$base_url" || remove_env_export "GOOGLE_BASE_URL"
             ;;
         groq)
-            echo "export GROQ_API_KEY=$api_key" >> "$env_file"
-            echo "export GROQ_BASE_URL=${base_url:-https://api.groq.com/openai/v1}" >> "$env_file"
+            upsert_env_export "GROQ_API_KEY" "$api_key"
+            upsert_env_export "GROQ_BASE_URL" "${base_url:-https://api.groq.com/openai/v1}"
             ;;
         mistral)
-            echo "export MISTRAL_API_KEY=$api_key" >> "$env_file"
-            echo "export MISTRAL_BASE_URL=${base_url:-https://api.mistral.ai/v1}" >> "$env_file"
+            upsert_env_export "MISTRAL_API_KEY" "$api_key"
+            upsert_env_export "MISTRAL_BASE_URL" "${base_url:-https://api.mistral.ai/v1}"
             ;;
         openrouter)
-            echo "export OPENROUTER_API_KEY=$api_key" >> "$env_file"
-            echo "export OPENROUTER_BASE_URL=${base_url:-https://openrouter.ai/api/v1}" >> "$env_file"
+            upsert_env_export "OPENROUTER_API_KEY" "$api_key"
+            upsert_env_export "OPENROUTER_BASE_URL" "${base_url:-https://openrouter.ai/api/v1}"
             ;;
         ollama)
-            echo "export OLLAMA_HOST=${base_url:-http://localhost:11434}" >> "$env_file"
+            upsert_env_export "OLLAMA_HOST" "${base_url:-http://localhost:11434}"
             ;;
         xai)
-            echo "export XAI_API_KEY=$api_key" >> "$env_file"
+            upsert_env_export "XAI_API_KEY" "$api_key"
             ;;
         zai)
-            echo "export ZAI_API_KEY=$api_key" >> "$env_file"
+            upsert_env_export "ZAI_API_KEY" "$api_key"
             ;;
         minimax|minimax-cn)
-            echo "export MINIMAX_API_KEY=$api_key" >> "$env_file"
+            upsert_env_export "MINIMAX_API_KEY" "$api_key"
+            if [ "$provider" = "minimax-cn" ]; then
+                upsert_env_export "MINIMAX_API_HOST" "https://api.minimaxi.com"
+            else
+                upsert_env_export "MINIMAX_API_HOST" "https://api.minimax.io"
+            fi
+            write_minimax_skill_config_menu "$api_key"
             ;;
         opencode|opencode-go)
-            echo "export OPENCODE_API_KEY=$api_key" >> "$env_file"
+            upsert_env_export "OPENCODE_API_KEY" "$api_key"
             ;;
     esac
+
+    local current_gateway_host current_gateway_port
+    current_gateway_host="$(get_gateway_host)"
+    current_gateway_port="$(get_gateway_port)"
+    upsert_env_export "OPENCLAW_GATEWAY_HOST" "$current_gateway_host"
+    upsert_env_export "OPENCLAW_GATEWAY_PORT" "$current_gateway_port"
     
     chmod 600 "$env_file"
 

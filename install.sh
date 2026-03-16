@@ -91,7 +91,14 @@ SWAP_PERSIST_ENABLE="${OPENCLAW_SWAP_PERSIST:-1}"
 SWAP_THRESHOLD_MB="${OPENCLAW_SWAP_THRESHOLD_MB:-4096}"
 SWAP_TARGET_MB="${OPENCLAW_SWAP_TARGET_MB:-0}"
 SWAP_FILE_BASE="${OPENCLAW_SWAP_FILE:-/swapfile.openclaw}"
+INSTALL_SKILL_DEPS="${OPENCLAW_INSTALL_SKILL_DEPS:-1}"
+SKILL_PIP_PACKAGES_DEFAULT="duckduckgo-search akshare requests pyyaml pypdf pillow openpyxl python-pptx python-docx lxml defusedxml pdf2image"
+SKILL_PIP_PACKAGES="${OPENCLAW_SKILL_PIP_PACKAGES:-$SKILL_PIP_PACKAGES_DEFAULT}"
+SKILL_PIP_PACKAGES_FILE_REL="skills/requirements-runtime.txt"
 AUTO_FIX_ATTEMPTED=0
+# 默认官方消息渠道插件：
+# - feishu / discord / whatsapp 为内置 stock 插件，只需要启用即可
+# - wechat / qqbot / dingtalk 依赖额外插件包，优先使用本仓库 plugins/official/archives 内置 tgz
 DEFAULT_OFFICIAL_PLUGINS="@openclaw/feishu @openclaw/discord @openclaw/whatsapp openclaw-wechat-channel @sliverp/qqbot openclaw-channel-dingtalk"
 DEFAULT_BUILTIN_CHANNEL_PLUGINS="telegram imessage"
 RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
@@ -322,6 +329,8 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_SWAP_THRESHOLD_MB=<默认4096>
   OPENCLAW_SWAP_TARGET_MB=<默认自动(2G或4G)>
   OPENCLAW_SWAP_FILE=</swapfile.openclaw>
+  OPENCLAW_INSTALL_SKILL_DEPS=0|1
+  OPENCLAW_SKILL_PIP_PACKAGES="<覆盖默认依赖包列表>"
   OPENCLAW_SKILLS_FORCE_UPDATE=0|1
   OPENCLAW_RULE_PROFILE=low|medium|high|none
   GEMINI_BASE_URL=<third_party_gemini_url>
@@ -932,7 +941,16 @@ EOF
     cat > "$memory_rule_file" <<EOF
 # 厂商控制规则（Memory 注入）
 
-记忆要求：
+## 运行基线（初始化）
+
+1. 用户消息必须秒回。任何 >5s 的操作都走后台，前台只做快速指令 message 发送。
+2. 使用第一性原理思考。不要假设用户非常清楚自己想要什么和该怎么得到。从原始需求和问题本质出发，审慎分析后再行动。
+3. 每次 heartbeat 必须主动检查工作进度。数据连续不变 = 异常信号，kill 卡住的进程并重发任务，不要只报数字。
+4. 上下文努力控制在 100k 以内。大了会慢、会挂、会丢消息。主动做 compaction，不要等爆。
+5. 你不只是在完成任务，你是在值班。没人叫你也要巡逻：查 Codex、查进度、查异常、查卡住。主动发现问题比被动等指令更重要。
+
+## 规则约束（档位 ${level}）
+
 - 始终遵循档位 ${level} 的预算控制。
 - 当预算接近上限时先返回摘要与下一步建议，避免超限。
 - 不记录或复述明文密钥与敏感凭据。
@@ -1308,19 +1326,162 @@ install_dependencies() {
     case "$OS" in
         ubuntu|debian)
             sudo apt-get update
-            sudo apt-get install -y curl wget jq
+            sudo apt-get install -y curl wget jq python3 python3-pip poppler-utils
             ;;
         centos|rhel|fedora)
-            sudo yum install -y curl wget jq
+            sudo yum install -y curl wget jq python3 python3-pip poppler-utils || \
+            sudo yum install -y curl wget jq python3 python3-pip
             ;;
         macos)
             install_homebrew
-            brew install curl wget jq
+            brew install curl wget jq python poppler
             ;;
     esac
     
     install_git
     install_nodejs
+    ensure_uvx_for_minimax_skills || true
+    install_skill_runtime_python_deps || true
+}
+
+ensure_uvx_for_minimax_skills() {
+    if check_command uvx; then
+        log_info "uvx 已安装: $(command -v uvx)"
+        ensure_minimax_mcp_for_skills || true
+        return 0
+    fi
+
+    log_step "检查 MiniMax Web Search 依赖 (uvx)..."
+    local installer tmp_log
+    installer="$(mktemp /tmp/uv-install.XXXXXX.sh)"
+    tmp_log="$(mktemp /tmp/uv-install.XXXXXX.log)"
+
+    if ! curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "https://astral.sh/uv/install.sh" -o "$installer"; then
+        log_warn "无法下载 uv 安装脚本，已跳过自动安装 uvx。"
+        rm -f "$installer" "$tmp_log" 2>/dev/null || true
+        return 1
+    fi
+
+    if sh "$installer" >"$tmp_log" 2>&1; then
+        export PATH="$HOME/.local/bin:$PATH"
+        hash -r 2>/dev/null || true
+        if check_command uvx; then
+            log_info "uvx 安装成功: $(command -v uvx)"
+            ensure_minimax_mcp_for_skills || true
+            rm -f "$installer" "$tmp_log" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
+    log_warn "uvx 自动安装未成功。MiniMax Web Search 可能不可用。"
+    tail -n 5 "$tmp_log" 2>/dev/null | sed 's/^/  /'
+    rm -f "$installer" "$tmp_log" 2>/dev/null || true
+    return 1
+}
+
+ensure_minimax_mcp_for_skills() {
+    if ! check_command uvx; then
+        return 1
+    fi
+
+    if uvx minimax-coding-plan-mcp --help >/dev/null 2>&1; then
+        log_info "minimax-coding-plan-mcp 已可用"
+        return 0
+    fi
+
+    local log_file
+    log_file="$(mktemp /tmp/minimax-mcp-install.XXXXXX.log)"
+    if uvx install minimax-coding-plan-mcp >"$log_file" 2>&1; then
+        log_info "minimax-coding-plan-mcp 安装完成"
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+
+    log_warn "minimax-coding-plan-mcp 自动安装失败，MiniMax Web Search 可能不可用。"
+    tail -n 8 "$log_file" 2>/dev/null | sed 's/^/  /'
+    rm -f "$log_file" 2>/dev/null || true
+    return 1
+}
+
+pip_install_skill_dep() {
+    local pkg="$1"
+    local log_file
+    log_file="$(mktemp /tmp/openclaw-pip-install.XXXXXX.log)"
+
+    if python3 -m pip install --user --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if python3 -m pip install --user --break-system-packages --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+    if python3 -m pip install --break-system-packages --disable-pip-version-check "$pkg" >"$log_file" 2>&1; then
+        rm -f "$log_file" 2>/dev/null || true
+        return 0
+    fi
+
+    log_warn "Python 依赖安装失败: $pkg"
+    tail -n 6 "$log_file" 2>/dev/null | sed 's/^/  /'
+    rm -f "$log_file" 2>/dev/null || true
+    return 1
+}
+
+resolve_skill_pip_packages() {
+    local script_dir req_file line pkgs
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    req_file="$script_dir/$SKILL_PIP_PACKAGES_FILE_REL"
+
+    if [ -f "$req_file" ]; then
+        pkgs=""
+        while IFS= read -r line; do
+            line="$(echo "$line" | sed 's/#.*$//' | xargs)"
+            [ -n "$line" ] || continue
+            pkgs="$pkgs $line"
+        done < "$req_file"
+        echo "$pkgs" | xargs
+        return 0
+    fi
+    echo "$SKILL_PIP_PACKAGES"
+}
+
+install_skill_runtime_python_deps() {
+    [ "$INSTALL_SKILL_DEPS" = "1" ] || {
+        log_info "已设置 OPENCLAW_INSTALL_SKILL_DEPS=0，跳过 skills 运行依赖安装"
+        return 0
+    }
+
+    if ! check_command python3; then
+        log_warn "未检测到 python3，跳过 skills Python 依赖安装"
+        return 1
+    fi
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        log_warn "未检测到 pip，跳过 skills Python 依赖安装"
+        return 1
+    fi
+
+    log_step "安装默认 skills 运行依赖..."
+    local pkg ok fail packages
+    ok=0
+    fail=0
+    packages="$(resolve_skill_pip_packages)"
+    for pkg in $packages; do
+        if pip_install_skill_dep "$pkg"; then
+            ok=$((ok + 1))
+        else
+            fail=$((fail + 1))
+        fi
+    done
+
+    export PATH="$HOME/.local/bin:$PATH"
+    hash -r 2>/dev/null || true
+
+    log_info "skills 依赖安装完成: 成功 ${ok}，失败 ${fail}"
+    if [ "$fail" -gt 0 ]; then
+        log_warn "部分依赖安装失败，可能影响个别 skills，可稍后手动执行: python3 -m pip install --user $packages"
+        return 1
+    fi
+    return 0
 }
 
 # ================================ OpenClaw 安装 ================================
@@ -1952,7 +2113,7 @@ install_default_official_plugins() {
 
     cleanup_stale_plugin_state
 
-    log_step "同步默认消息渠道插件集（仓库本地包优先）..."
+    log_step "同步默认消息渠道插件集（优先启用内置，其次使用仓库本地包）..."
     local ok=0
     local fail=0
     local builtins_ok=0
@@ -1961,24 +2122,31 @@ install_default_official_plugins() {
     for plugin in $DEFAULT_OFFICIAL_PLUGINS; do
         spec="$plugin"
         plugin_alias="$(plugin_enable_alias_from_spec_install "$spec")"
-        local_source="$(resolve_official_plugin_local_source_install "$spec" "$bundle_dir" 2>/dev/null || true)"
 
+        # 1) 先尝试仅启用（针对 feishu/discord/whatsapp 这类内置 stock 插件）
+        if openclaw plugins enable "$plugin_alias" >/dev/null 2>&1; then
+            ok=$((ok + 1))
+            continue
+        fi
+
+        # 2) 启用失败时再尝试从仓库本地包安装
+        local_source="$(resolve_official_plugin_local_source_install "$spec" "$bundle_dir" 2>/dev/null || true)"
         if [ -n "$local_source" ]; then
             if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
                 openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
                 ok=$((ok + 1))
                 continue
             fi
-            log_warn "本地插件包安装失败: $spec -> $local_source"
             fail=$((fail + 1))
             continue
         fi
 
-        if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
+        # 3) 如显式允许远端兜底，则最后再尝试一次在线安装
+        if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && \
+           (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
             openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
             ok=$((ok + 1))
         else
-            log_warn "本地插件包缺失或安装失败: $spec（仓库缺包时请补齐 plugins/official）"
             fail=$((fail + 1))
         fi
     done
@@ -2316,6 +2484,39 @@ PYEOF
     fi
 }
 
+write_minimax_skill_config_install() {
+    local api_key="$1"
+    [ -n "$api_key" ] || return 0
+
+    local cfg_dir="$CONFIG_DIR/config"
+    local cfg_file="$cfg_dir/minimax.json"
+    local output_path="$CONFIG_DIR/workspace/minimax-output"
+
+    mkdir -p "$cfg_dir" "$output_path" 2>/dev/null || true
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - <<PYEOF
+import json, os
+cfg_file = os.path.expanduser("$cfg_file")
+payload = {
+    "api_key": "$api_key",
+    "output_path": "~/.openclaw/workspace/minimax-output"
+}
+os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
+with open(cfg_file, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+PYEOF
+    else
+        cat > "$cfg_file" <<EOF
+{
+  "api_key": "$api_key",
+  "output_path": "~/.openclaw/workspace/minimax-output"
+}
+EOF
+    fi
+    chmod 600 "$cfg_file" 2>/dev/null || true
+}
+
 # 配置 OpenClaw 使用的 AI 模型和 API Key
 configure_openclaw_model() {
     log_step "配置 OpenClaw AI 模型..."
@@ -2323,65 +2524,73 @@ configure_openclaw_model() {
     local env_file="$HOME/.openclaw/env"
     local openclaw_json="$HOME/.openclaw/openclaw.json"
     
-    # 创建环境变量文件
-    cat > "$env_file" << EOF
+    # 首次创建环境变量文件，后续采用增量更新避免覆盖其他 Provider Key
+    if [ ! -f "$env_file" ]; then
+        cat > "$env_file" << EOF
 # OpenClaw 环境变量配置
 # 由安装脚本自动生成: $(date '+%Y-%m-%d %H:%M:%S')
 EOF
+    fi
 
     # 根据 AI_PROVIDER 设置对应的环境变量
     case "$AI_PROVIDER" in
         anthropic)
-            echo "export ANTHROPIC_API_KEY=$AI_KEY" >> "$env_file"
-            [ -n "$BASE_URL" ] && echo "export ANTHROPIC_BASE_URL=$BASE_URL" >> "$env_file"
+            upsert_env_export_install "ANTHROPIC_API_KEY" "$AI_KEY"
+            [ -n "$BASE_URL" ] && upsert_env_export_install "ANTHROPIC_BASE_URL" "$BASE_URL" || remove_env_export_install "ANTHROPIC_BASE_URL"
             ;;
         openai)
-            echo "export OPENAI_API_KEY=$AI_KEY" >> "$env_file"
-            [ -n "$BASE_URL" ] && echo "export OPENAI_BASE_URL=$BASE_URL" >> "$env_file"
+            upsert_env_export_install "OPENAI_API_KEY" "$AI_KEY"
+            [ -n "$BASE_URL" ] && upsert_env_export_install "OPENAI_BASE_URL" "$BASE_URL" || remove_env_export_install "OPENAI_BASE_URL"
             ;;
         deepseek)
-            echo "export DEEPSEEK_API_KEY=$AI_KEY" >> "$env_file"
-            echo "export DEEPSEEK_BASE_URL=${BASE_URL:-https://api.deepseek.com}" >> "$env_file"
+            upsert_env_export_install "DEEPSEEK_API_KEY" "$AI_KEY"
+            upsert_env_export_install "DEEPSEEK_BASE_URL" "${BASE_URL:-https://api.deepseek.com}"
             ;;
         moonshot|kimi)
-            echo "export MOONSHOT_API_KEY=$AI_KEY" >> "$env_file"
-            echo "export MOONSHOT_BASE_URL=${BASE_URL:-https://api.moonshot.ai/v1}" >> "$env_file"
+            upsert_env_export_install "MOONSHOT_API_KEY" "$AI_KEY"
+            upsert_env_export_install "MOONSHOT_BASE_URL" "${BASE_URL:-https://api.moonshot.ai/v1}"
             ;;
         google|google-gemini-cli|google-antigravity)
-            echo "export GOOGLE_API_KEY=$AI_KEY" >> "$env_file"
-            [ -n "$BASE_URL" ] && echo "export GOOGLE_BASE_URL=$BASE_URL" >> "$env_file"
+            upsert_env_export_install "GOOGLE_API_KEY" "$AI_KEY"
+            [ -n "$BASE_URL" ] && upsert_env_export_install "GOOGLE_BASE_URL" "$BASE_URL" || remove_env_export_install "GOOGLE_BASE_URL"
             ;;
         groq)
-            echo "export GROQ_API_KEY=$AI_KEY" >> "$env_file"
-            echo "export GROQ_BASE_URL=${BASE_URL:-https://api.groq.com/openai/v1}" >> "$env_file"
+            upsert_env_export_install "GROQ_API_KEY" "$AI_KEY"
+            upsert_env_export_install "GROQ_BASE_URL" "${BASE_URL:-https://api.groq.com/openai/v1}"
             ;;
         mistral)
-            echo "export MISTRAL_API_KEY=$AI_KEY" >> "$env_file"
-            echo "export MISTRAL_BASE_URL=${BASE_URL:-https://api.mistral.ai/v1}" >> "$env_file"
+            upsert_env_export_install "MISTRAL_API_KEY" "$AI_KEY"
+            upsert_env_export_install "MISTRAL_BASE_URL" "${BASE_URL:-https://api.mistral.ai/v1}"
             ;;
         openrouter)
-            echo "export OPENROUTER_API_KEY=$AI_KEY" >> "$env_file"
-            echo "export OPENROUTER_BASE_URL=${BASE_URL:-https://openrouter.ai/api/v1}" >> "$env_file"
+            upsert_env_export_install "OPENROUTER_API_KEY" "$AI_KEY"
+            upsert_env_export_install "OPENROUTER_BASE_URL" "${BASE_URL:-https://openrouter.ai/api/v1}"
             ;;
         ollama)
-            echo "export OLLAMA_HOST=${BASE_URL:-http://localhost:11434}" >> "$env_file"
+            upsert_env_export_install "OLLAMA_HOST" "${BASE_URL:-http://localhost:11434}"
             ;;
         xai)
-            echo "export XAI_API_KEY=$AI_KEY" >> "$env_file"
+            upsert_env_export_install "XAI_API_KEY" "$AI_KEY"
             ;;
         zai)
-            echo "export ZAI_API_KEY=$AI_KEY" >> "$env_file"
+            upsert_env_export_install "ZAI_API_KEY" "$AI_KEY"
             ;;
         minimax|minimax-cn)
-            echo "export MINIMAX_API_KEY=$AI_KEY" >> "$env_file"
+            upsert_env_export_install "MINIMAX_API_KEY" "$AI_KEY"
+            if [ "$AI_PROVIDER" = "minimax-cn" ]; then
+                upsert_env_export_install "MINIMAX_API_HOST" "https://api.minimaxi.com"
+            else
+                upsert_env_export_install "MINIMAX_API_HOST" "https://api.minimax.io"
+            fi
+            write_minimax_skill_config_install "$AI_KEY"
             ;;
         opencode|opencode-go)
-            echo "export OPENCODE_API_KEY=$AI_KEY" >> "$env_file"
+            upsert_env_export_install "OPENCODE_API_KEY" "$AI_KEY"
             ;;
     esac
 
-    echo "export OPENCLAW_GATEWAY_HOST=$GATEWAY_HOST" >> "$env_file"
-    echo "export OPENCLAW_GATEWAY_PORT=$GATEWAY_PORT" >> "$env_file"
+    upsert_env_export_install "OPENCLAW_GATEWAY_HOST" "$GATEWAY_HOST"
+    upsert_env_export_install "OPENCLAW_GATEWAY_PORT" "$GATEWAY_PORT"
     
     chmod 600 "$env_file"
     log_info "环境变量配置已保存到: $env_file"
