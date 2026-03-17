@@ -93,6 +93,7 @@ GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-}"
 GATEWAY_HOST="${OPENCLAW_GATEWAY_HOST:-}"
 GATEWAY_CUSTOM_BIND_HOST="${OPENCLAW_GATEWAY_CUSTOM_BIND_HOST:-}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-13145}"
+GATEWAY_CONVERGE_MARKER="/tmp/openclaw-installer-gateway-converged.$$"
 RESET_CHAT_AFTER_INSTALL="${OPENCLAW_RESET_CHAT_AFTER_INSTALL:-1}"
 AUTO_SWAP_ENABLE="${OPENCLAW_AUTO_SWAP:-1}"
 SWAP_PERSIST_ENABLE="${OPENCLAW_SWAP_PERSIST:-1}"
@@ -2494,15 +2495,25 @@ PY
 
 normalize_channel_policy_in_json_install() {
     local cfg="$CONFIG_DIR/openclaw.json"
+    if check_command openclaw; then
+        local active_cfg
+        active_cfg="$(openclaw config file 2>/dev/null | head -n 1 | tr -d '\r')"
+        case "$active_cfg" in
+            "~/"*) active_cfg="$HOME/${active_cfg#~/}" ;;
+        esac
+        if [ -n "$active_cfg" ] && [ "$active_cfg" != "undefined" ]; then
+            cfg="$active_cfg"
+        fi
+    fi
     if [ ! -f "$cfg" ]; then
         mkdir -p "$(dirname "$cfg")" 2>/dev/null || true
         cat > "$cfg" <<'EOF'
 {
   "channels": {
-    "feishu": { "groupPolicy": "open" },
-    "telegram": { "groupPolicy": "open" },
-    "whatsapp": { "groupPolicy": "open" },
-    "imessage": { "groupPolicy": "open" }
+    "feishu": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "telegram": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "whatsapp": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "imessage": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] }
   }
 }
 EOF
@@ -2517,9 +2528,17 @@ EOF
             | (.channels.whatsapp //= {})
             | (.channels.imessage //= {})
             | .channels.feishu.groupPolicy = "open"
+            | .channels.feishu.allowFrom = ["*"]
+            | .channels.feishu.groupAllowFrom = ["*"]
             | .channels.telegram.groupPolicy = "open"
+            | .channels.telegram.allowFrom = ["*"]
+            | .channels.telegram.groupAllowFrom = ["*"]
             | .channels.whatsapp.groupPolicy = "open"
+            | .channels.whatsapp.allowFrom = ["*"]
+            | .channels.whatsapp.groupAllowFrom = ["*"]
             | .channels.imessage.groupPolicy = "open"
+            | .channels.imessage.allowFrom = ["*"]
+            | .channels.imessage.groupAllowFrom = ["*"]
         ' "$cfg" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
             mv "$tmp" "$cfg"
             return 0
@@ -2542,6 +2561,8 @@ try:
         if not isinstance(item, dict):
             item = {}
         item["groupPolicy"] = "open"
+        item["allowFrom"] = ["*"]
+        item["groupAllowFrom"] = ["*"]
         root[ch] = item
     data["channels"] = root
     with open(path, "w", encoding="utf-8") as f:
@@ -4639,6 +4660,7 @@ converge_gateway_single_instance() {
 
     log_step "收敛 Gateway 为单实例（bind=${GATEWAY_BIND}, port=${GATEWAY_PORT}）..."
     cleanup_legacy_gateway_runtime
+    normalize_channel_policy_in_json_install || true
 
     openclaw config set gateway.mode local >/dev/null 2>&1 || true
     openclaw config set gateway.bind "$GATEWAY_BIND" >/dev/null 2>&1 || true
@@ -4655,6 +4677,7 @@ converge_gateway_single_instance() {
 
     if [ "$mode" = "install-only" ]; then
         GATEWAY_CONVERGED_ONCE=1
+        : > "$GATEWAY_CONVERGE_MARKER" 2>/dev/null || true
         log_info "Gateway 单实例服务收敛完成（未启动）"
         return 0
     fi
@@ -4672,6 +4695,7 @@ converge_gateway_single_instance() {
 
     if [ -n "$gateway_pid" ]; then
         GATEWAY_CONVERGED_ONCE=1
+        : > "$GATEWAY_CONVERGE_MARKER" 2>/dev/null || true
         log_info "Gateway 已单实例运行 (PID: $gateway_pid, bind=${GATEWAY_BIND}, port=${GATEWAY_PORT})"
         openclaw gateway status 2>/dev/null | head -8 | sed 's/^/  /' || true
         return 0
@@ -4748,7 +4772,7 @@ start_openclaw_service() {
         fi
     fi
 
-    if [ "${GATEWAY_CONVERGED_ONCE:-0}" = "1" ]; then
+    if [ "${GATEWAY_CONVERGED_ONCE:-0}" = "1" ] || [ -f "$GATEWAY_CONVERGE_MARKER" ]; then
         log_info "已在本次安装中完成 Gateway 单实例收敛，跳过重复收敛。"
         openclaw gateway restart >/dev/null 2>&1 || openclaw gateway start >/dev/null 2>&1 || true
         sleep 2
@@ -4903,7 +4927,6 @@ main() {
     log_info "已禁用安装阶段机器人初始化设置，保持 OpenClaw 默认身份配置。"
     apply_vendor_rule_profile
     apply_default_security_baseline
-    cleanup_stale_plugin_state
     reset_gateway_chat_history_for_fresh_start
     apply_default_welcome_after_session_reset
     if ! run_step_with_auto_fix "设置开机守护进程" setup_daemon; then

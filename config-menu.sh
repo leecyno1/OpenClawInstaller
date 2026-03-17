@@ -6141,8 +6141,24 @@ cleanup_stale_plugin_state_menu() {
     done
 }
 
-cleanup_stale_channel_keys_in_json_menu() {
+resolve_openclaw_json_path_menu() {
     local cfg="$OPENCLAW_JSON"
+    if check_openclaw_installed; then
+        local active_cfg
+        active_cfg="$(openclaw config file 2>/dev/null | head -n 1 | tr -d '\r')"
+        case "$active_cfg" in
+            "~/"*) active_cfg="$HOME/${active_cfg#~/}" ;;
+        esac
+        if [ -n "$active_cfg" ] && [ "$active_cfg" != "undefined" ]; then
+            cfg="$active_cfg"
+        fi
+    fi
+    echo "$cfg"
+}
+
+cleanup_stale_channel_keys_in_json_menu() {
+    local cfg
+    cfg="$(resolve_openclaw_json_path_menu)"
     [ -f "$cfg" ] || return 0
     if command -v jq >/dev/null 2>&1; then
         local tmp
@@ -6182,16 +6198,17 @@ PY
 }
 
 normalize_channel_policy_in_json_menu() {
-    local cfg="$OPENCLAW_JSON"
+    local cfg
+    cfg="$(resolve_openclaw_json_path_menu)"
     if [ ! -f "$cfg" ]; then
         mkdir -p "$(dirname "$cfg")" 2>/dev/null || true
         cat > "$cfg" <<'EOF'
 {
   "channels": {
-    "feishu": { "groupPolicy": "open" },
-    "telegram": { "groupPolicy": "open" },
-    "whatsapp": { "groupPolicy": "open" },
-    "imessage": { "groupPolicy": "open" }
+    "feishu": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "telegram": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "whatsapp": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
+    "imessage": { "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] }
   }
 }
 EOF
@@ -6206,9 +6223,17 @@ EOF
             | (.channels.whatsapp //= {})
             | (.channels.imessage //= {})
             | .channels.feishu.groupPolicy = "open"
+            | .channels.feishu.allowFrom = ["*"]
+            | .channels.feishu.groupAllowFrom = ["*"]
             | .channels.telegram.groupPolicy = "open"
+            | .channels.telegram.allowFrom = ["*"]
+            | .channels.telegram.groupAllowFrom = ["*"]
             | .channels.whatsapp.groupPolicy = "open"
+            | .channels.whatsapp.allowFrom = ["*"]
+            | .channels.whatsapp.groupAllowFrom = ["*"]
             | .channels.imessage.groupPolicy = "open"
+            | .channels.imessage.allowFrom = ["*"]
+            | .channels.imessage.groupAllowFrom = ["*"]
         ' "$cfg" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
             mv "$tmp" "$cfg"
             return 0
@@ -6231,6 +6256,8 @@ try:
         if not isinstance(item, dict):
             item = {}
         item["groupPolicy"] = "open"
+        item["allowFrom"] = ["*"]
+        item["groupAllowFrom"] = ["*"]
         root[ch] = item
     data["channels"] = root
     with open(path, "w", encoding="utf-8") as f:
