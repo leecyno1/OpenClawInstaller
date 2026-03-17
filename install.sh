@@ -329,7 +329,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --no-onboard                         跳过本脚本 AI 初始化向导
   --onboard                            强制执行本脚本 AI 初始化向导
   --no-prompt                          非交互模式（使用默认值）
-  --auto-confirm-all, --fast-install   全自动模式（所有确认默认通过，选择题默认 1，等价 no-prompt + no-onboard）
+  --auto-confirm-all, --fast-install   全自动模式（所有确认默认通过，选择题默认 1；官方仅执行模型配置，其它官方步骤跳过）
   --dry-run                            只显示执行计划，不做变更
   --verbose                            详细日志
   --gateway-host <host>               Gateway 监听地址 (默认: 127.0.0.1)
@@ -429,7 +429,7 @@ parse_args() {
             --auto-confirm-all|--fast-install)
                 AUTO_CONFIRM_ALL=1
                 NO_PROMPT=1
-                NO_ONBOARD=1
+                NO_ONBOARD=0
                 shift
                 ;;
             --dry-run)
@@ -1400,7 +1400,7 @@ normalize_install_options() {
 
     if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
         NO_PROMPT=1
-        NO_ONBOARD=1
+        NO_ONBOARD=0
         if [ -z "${OPENCLAW_RULE_PROFILE:-}" ]; then
             RULE_PROFILE_SELECTED="low"
         fi
@@ -2321,7 +2321,7 @@ EOF
 }
 
 run_official_onboard() {
-    if [ "$NO_PROMPT" = "1" ]; then
+    if [ "$NO_PROMPT" = "1" ] && [ "${AUTO_CONFIRM_ALL:-0}" != "1" ]; then
         log_info "NO_PROMPT 模式下跳过交互式官方向导，可稍后手动运行: openclaw onboard"
         return 0
     fi
@@ -2329,6 +2329,66 @@ run_official_onboard() {
     if ! check_command openclaw; then
         log_error "未检测到 openclaw 命令，无法启动官方向导。"
         return 1
+    fi
+
+    if [ "$NO_PROMPT" = "1" ] && [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        log_step "全自动模式：执行官方模型配置（非交互，跳过官方其它步骤）..."
+        local auth_choice="skip"
+        local auth_args=()
+        local existing_env="$HOME/.openclaw/env"
+
+        if [ -f "$existing_env" ]; then
+            # shellcheck disable=SC1090
+            source "$existing_env" >/dev/null 2>&1 || true
+        fi
+
+        if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            auth_choice="anthropic-api-key"
+            auth_args+=(--anthropic-api-key "$ANTHROPIC_API_KEY")
+        elif [ -n "${OPENAI_API_KEY:-}" ]; then
+            auth_choice="openai-api-key"
+            auth_args+=(--openai-api-key "$OPENAI_API_KEY")
+        elif [ -n "${MOONSHOT_API_KEY:-}" ]; then
+            auth_choice="moonshot-api-key"
+            auth_args+=(--moonshot-api-key "$MOONSHOT_API_KEY")
+        elif [ -n "${OPENROUTER_API_KEY:-}" ]; then
+            auth_choice="openrouter-api-key"
+            auth_args+=(--openrouter-api-key "$OPENROUTER_API_KEY")
+        elif [ -n "${MISTRAL_API_KEY:-}" ]; then
+            auth_choice="mistral-api-key"
+            auth_args+=(--mistral-api-key "$MISTRAL_API_KEY")
+        elif [ -n "${GEMINI_API_KEY:-}" ] || [ -n "${GOOGLE_API_KEY:-}" ]; then
+            auth_choice="gemini-api-key"
+            auth_args+=(--gemini-api-key "${GEMINI_API_KEY:-$GOOGLE_API_KEY}")
+        elif [ -n "${XAI_API_KEY:-}" ]; then
+            auth_choice="xai-api-key"
+            auth_args+=(--xai-api-key "$XAI_API_KEY")
+        elif [ -n "${ZAI_API_KEY:-}" ]; then
+            auth_choice="zai-api-key"
+            auth_args+=(--zai-api-key "$ZAI_API_KEY")
+        elif [ -n "${MINIMAX_API_KEY:-}" ]; then
+            auth_choice="minimax-global-api"
+            auth_args+=(--minimax-api-key "$MINIMAX_API_KEY")
+        fi
+
+        local onboard_args=(
+            --non-interactive
+            --accept-risk
+            --flow quickstart
+            --mode local
+            --gateway-bind "$GATEWAY_BIND"
+            --gateway-port "$GATEWAY_PORT"
+            --skip-channels
+            --skip-search
+            --skip-skills
+            --skip-ui
+            --skip-daemon
+            --skip-health
+            --auth-choice "$auth_choice"
+        )
+        onboard_args+=("${auth_args[@]}")
+        openclaw onboard "${onboard_args[@]}"
+        return $?
     fi
 
     log_step "启动官方配置向导（openclaw onboard）..."
@@ -3727,12 +3787,23 @@ run_onboard_wizard() {
             echo -e "${WHITE}  第 2 步: 非官方消息渠道配置（社区）${NC}"
             echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
+            if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+                log_info "全自动模式：已跳过非官方消息渠道配置菜单。"
+                log_info "如需配置渠道，请稍后手动执行: bash ./config-menu.sh"
+                log_info "官方配置流程完成。"
+                return 0
+            fi
             if confirm "现在进入非官方消息渠道配置（社区）？" "y"; then
                 if ! run_step_with_auto_fix "非官方消息渠道配置菜单" run_config_menu --channels-only; then
                     log_warn "非官方消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
                 fi
             fi
             log_info "官方配置流程完成。"
+            return 0
+        fi
+        if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+            log_warn "全自动模式下官方模型配置失败，已跳过回退向导以保持官方流程一致。"
+            log_warn "请稍后手动执行: openclaw onboard"
             return 0
         fi
         log_warn "官方向导执行失败，将回退到内置兼容向导。"
