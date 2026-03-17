@@ -84,7 +84,14 @@ INSTALLER_MIRROR_RAW_URL="${OPENCLAW_INSTALLER_MIRROR_RAW_URL:-https://mirror.gh
 OFFICIAL_INSTALL_MIRROR_URL="${OPENCLAW_OFFICIAL_INSTALL_MIRROR_URL:-}"
 CURL_CONNECT_TIMEOUT="${OPENCLAW_CURL_CONNECT_TIMEOUT:-8}"
 CURL_MAX_TIME="${OPENCLAW_CURL_MAX_TIME:-30}"
-GATEWAY_HOST="${OPENCLAW_GATEWAY_HOST:-127.0.0.1}"
+DOWNLOAD_RETRIES="${OPENCLAW_DOWNLOAD_RETRIES:-3}"
+DOWNLOAD_BACKOFF_SECONDS="${OPENCLAW_DOWNLOAD_BACKOFF_SECONDS:-2}"
+PLUGIN_INSTALL_RETRIES="${OPENCLAW_PLUGIN_INSTALL_RETRIES:-2}"
+PLUGIN_INSTALL_BACKOFF_SECONDS="${OPENCLAW_PLUGIN_INSTALL_BACKOFF_SECONDS:-2}"
+AUTO_CONFIRM_ALL="${OPENCLAW_AUTO_CONFIRM_ALL:-0}"
+GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-}"
+GATEWAY_HOST="${OPENCLAW_GATEWAY_HOST:-}"
+GATEWAY_CUSTOM_BIND_HOST="${OPENCLAW_GATEWAY_CUSTOM_BIND_HOST:-}"
 GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-13145}"
 RESET_CHAT_AFTER_INSTALL="${OPENCLAW_RESET_CHAT_AFTER_INSTALL:-1}"
 AUTO_SWAP_ENABLE="${OPENCLAW_AUTO_SWAP:-1}"
@@ -259,13 +266,31 @@ download_with_fallback() {
     local output_path="$1"
     shift
     local url=""
+    local attempts="${DOWNLOAD_RETRIES:-3}"
+    local backoff="${DOWNLOAD_BACKOFF_SECONDS:-2}"
+    local attempt
+
+    if ! [[ "$attempts" =~ ^[0-9]+$ ]] || [ "$attempts" -lt 1 ]; then
+        attempts=1
+    fi
+    if ! [[ "$backoff" =~ ^[0-9]+$ ]] || [ "$backoff" -lt 1 ]; then
+        backoff=1
+    fi
+
     for url in "$@"; do
         [ -z "$url" ] && continue
-        if curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "$url" -o "$output_path"; then
-            log_info "下载成功: $url"
-            return 0
-        fi
-        log_warn "下载失败: $url"
+        attempt=1
+        while [ "$attempt" -le "$attempts" ]; do
+            if curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" "$url" -o "$output_path"; then
+                log_info "下载成功: $url (attempt ${attempt}/${attempts})"
+                return 0
+            fi
+            if [ "$attempt" -lt "$attempts" ]; then
+                sleep $((backoff * attempt))
+            fi
+            attempt=$((attempt + 1))
+        done
+        log_warn "下载失败: $url（已重试 ${attempts} 次）"
     done
     return 1
 }
@@ -302,9 +327,12 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --no-onboard                         跳过本脚本 AI 初始化向导
   --onboard                            强制执行本脚本 AI 初始化向导
   --no-prompt                          非交互模式（使用默认值）
+  --auto-confirm-all, --fast-install   全自动模式（所有确认默认通过，选择题默认 1，等价 no-prompt + no-onboard）
   --dry-run                            只显示执行计划，不做变更
   --verbose                            详细日志
   --gateway-host <host>               Gateway 监听地址 (默认: 127.0.0.1)
+  --gateway-bind <mode>               Gateway 绑定模式: loopback|lan|tailnet|auto|custom
+  --gateway-custom-host <ipv4>        当绑定模式为 custom 时指定自定义 IPv4
   --gateway-port <port>               Gateway 监听端口 (默认: 13145)
   --reset-chat-history                安装后重置聊天历史 (默认开启)
   --keep-chat-history                 安装后保留历史聊天记录
@@ -319,13 +347,20 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   OPENCLAW_GIT_UPDATE=0|1
   OPENCLAW_NO_ONBOARD=0|1
   OPENCLAW_NO_PROMPT=0|1
+  OPENCLAW_AUTO_CONFIRM_ALL=0|1
   OPENCLAW_DRY_RUN=0|1
   OPENCLAW_VERBOSE=0|1
   OPENCLAW_INSTALLER_MIRROR_RAW_URL=<mirror_raw_url>
   OPENCLAW_OFFICIAL_INSTALL_MIRROR_URL=<mirror_install_sh_url>
   OPENCLAW_CURL_CONNECT_TIMEOUT=<seconds>
   OPENCLAW_CURL_MAX_TIME=<seconds>
-  OPENCLAW_GATEWAY_HOST=<默认127.0.0.1>
+  OPENCLAW_DOWNLOAD_RETRIES=<默认3>
+  OPENCLAW_DOWNLOAD_BACKOFF_SECONDS=<默认2>
+  OPENCLAW_PLUGIN_INSTALL_RETRIES=<默认2>
+  OPENCLAW_PLUGIN_INSTALL_BACKOFF_SECONDS=<默认2>
+  OPENCLAW_GATEWAY_BIND=<默认loopback>
+  OPENCLAW_GATEWAY_HOST=<旧变量，兼容映射到 bind/customBindHost>
+  OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=<custom 模式专用 IPv4>
   OPENCLAW_GATEWAY_PORT=<默认13145>
   OPENCLAW_RESET_CHAT_AFTER_INSTALL=0|1
   OPENCLAW_AUTO_SWAP=0|1
@@ -389,6 +424,12 @@ parse_args() {
                 NO_PROMPT=1
                 shift
                 ;;
+            --auto-confirm-all|--fast-install)
+                AUTO_CONFIRM_ALL=1
+                NO_PROMPT=1
+                NO_ONBOARD=1
+                shift
+                ;;
             --dry-run)
                 DRY_RUN=1
                 shift
@@ -396,6 +437,14 @@ parse_args() {
             --verbose)
                 VERBOSE=1
                 shift
+                ;;
+            --gateway-bind)
+                GATEWAY_BIND="$2"
+                shift 2
+                ;;
+            --gateway-custom-host)
+                GATEWAY_CUSTOM_BIND_HOST="$2"
+                shift 2
                 ;;
             --gateway-host)
                 GATEWAY_HOST="$2"
@@ -433,6 +482,14 @@ parse_args() {
 read_input() {
     local prompt="$1"
     local var_name="$2"
+    if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        local auto_value=""
+        if echo "$prompt" | grep -q "请选择"; then
+            auto_value="1"
+        fi
+        printf -v "$var_name" '%s' "$auto_value"
+        return 0
+    fi
     echo -en "$prompt"
     read $var_name < "$TTY_INPUT"
 }
@@ -455,7 +512,10 @@ read_secret_input() {
 confirm() {
     local message="$1"
     local default="${2:-y}"
-    
+    if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        return 0
+    fi
+
     if [ "$NO_PROMPT" = "1" ] || [ "$TTY_INPUT" = "/dev/null" ]; then
         [ "$default" = "y" ]
         return $?
@@ -536,6 +596,62 @@ normalize_bool_flag() {
         1|y|yes|true|on|enable|enabled) echo "1" ;;
         0|n|no|false|off|disable|disabled) echo "0" ;;
         *) echo "${2:-0}" ;;
+    esac
+}
+
+normalize_gateway_bind_mode() {
+    local raw host
+    raw="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '"'\''[:space:]')"
+    host="$(echo "${2:-}" | tr -d '"'\''[:space:]')"
+
+    case "$raw" in
+        loopback|lan|tailnet|auto|custom)
+            echo "$raw"
+            return 0
+            ;;
+        127.0.0.1|localhost|::1)
+            echo "loopback"
+            return 0
+            ;;
+        0.0.0.0|::|all)
+            echo "lan"
+            return 0
+            ;;
+        "")
+            case "$host" in
+                ""|127.0.0.1|localhost|::1)
+                    echo "loopback"
+                    ;;
+                0.0.0.0|::|all)
+                    echo "lan"
+                    ;;
+                tailnet)
+                    echo "tailnet"
+                    ;;
+                auto|loopback|lan|custom)
+                    echo "$host"
+                    ;;
+                *)
+                    echo "custom"
+                    ;;
+            esac
+            return 0
+            ;;
+    esac
+
+    echo "loopback"
+}
+
+get_gateway_bind_display_host_install() {
+    local bind="$1"
+    local custom_host="$2"
+    case "$bind" in
+        loopback) echo "127.0.0.1" ;;
+        lan) echo "0.0.0.0" ;;
+        tailnet) echo "tailnet" ;;
+        auto) echo "auto" ;;
+        custom) echo "${custom_host:-custom}" ;;
+        *) echo "127.0.0.1" ;;
     esac
 }
 
@@ -945,6 +1061,8 @@ write_profile_policy_files() {
     local prompt_text
     local now_iso
     local gemini_url gemini_model nano_url nano_image_model nano_video_model
+    local persona_user_name persona_timezone persona_location persona_goal
+    local persona_style persona_work_mode persona_agent_name persona_agent_emoji
 
     limits="$(get_profile_token_limits "$level")"
     window_hours="$(echo "$limits" | awk '{print $1}')"
@@ -969,14 +1087,28 @@ write_profile_policy_files() {
     local agent_dir="$CONFIG_DIR/agents/main/agent"
     local memory_dir="$CONFIG_DIR/agents/main/memory"
     local session_dir="$CONFIG_DIR/agents/main/sessions"
+    local persona_dir="$CONFIG_DIR/agents/main/persona"
     local system_rule_file="$agent_dir/vendor-control-system.md"
     local memory_rule_file="$memory_dir/vendor-control-memory.md"
     local session_rule_file="$session_dir/vendor-control-session.md"
     local soul_rule_file="$soul_dir/vendor-control-soul.md"
+    local persona_soul_file="$persona_dir/SOUL.md"
+    local persona_agents_file="$persona_dir/AGENTS.md"
+    local persona_user_file="$persona_dir/USER.md"
+    local persona_identity_file="$persona_dir/IDENTITY.md"
     local policy_json="$policy_dir/vendor-control-profile.json"
     local prompt_file="$policy_dir/vendor-control-prompts.md"
 
-    mkdir -p "$policy_dir" "$soul_dir" "$agent_dir" "$memory_dir" "$session_dir" 2>/dev/null || true
+    persona_user_name="${OPENCLAW_USER_NAME:-主人}"
+    persona_timezone="${OPENCLAW_USER_TIMEZONE:-Asia/Shanghai}"
+    persona_location="${OPENCLAW_USER_REGION:-中国大陆}"
+    persona_goal="${OPENCLAW_USER_GOAL:-综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等}"
+    persona_style="${OPENCLAW_ASSISTANT_PERSONALITY:-严谨、适当幽默、务实}"
+    persona_work_mode="${OPENCLAW_ASSISTANT_WORK_MODE:-整段回复，主动汇报，积极响应并调用skills}"
+    persona_agent_name="${OPENCLAW_ASSISTANT_NAME:-龙虾小助理}"
+    persona_agent_emoji="${OPENCLAW_ASSISTANT_EMOJI:-🦞}"
+
+    mkdir -p "$policy_dir" "$soul_dir" "$agent_dir" "$memory_dir" "$session_dir" "$persona_dir" 2>/dev/null || true
 
     cat > "$system_rule_file" <<EOF
 # 厂商控制规则（系统层）
@@ -1044,6 +1176,79 @@ EOF
 - 在不降低正确性的前提下控制资源开销。
 EOF
 
+    cat > "$persona_soul_file" <<EOF
+# SOUL.md - 基础人格规则
+
+## 性格
+- ${persona_style}
+- 反应快、务实、先结论后细节，不说空话。
+
+## 原则
+- 执行优先：有明确指令先行动，边界不清先澄清。
+- 透明汇报：完成、卡住、失败都主动同步。
+- 安全第一：涉及密钥、隐私、越权请求一律拒绝并给替代方案。
+
+## 语言铁律（不可违反）
+- 全部输出使用简体中文；英文术语需附中文解释。
+- 时间统一按北京时间说明（必要时附绝对日期）。
+EOF
+
+    cat > "$persona_agents_file" <<EOF
+# AGENTS.md - 基础工作手册
+
+## 任务流程（SOP）
+1. 接收任务并复述目标与验收标准。
+2. 先判断风险等级与权限边界，再决定执行或分派。
+3. 执行中超过 5 秒的步骤转后台，前台先回执进度。
+4. 完成后输出结果、证据、后续建议。
+
+## 协作边界
+- 不越权处理高风险操作；不可逆操作必须二次确认。
+- 不确定信息先查 memory/session/policy，再回答，不靠猜测。
+- 工具调用失败时先降级兜底，再给可执行替代路径。
+
+## 触发规则
+- 上下文 >= ${context_ask_tokens} tokens：先询问是否执行 /compact。
+- 检测敏感内容请求：拒绝并返回合规说明。
+EOF
+
+    cat > "$persona_user_file" <<EOF
+# USER.md - 用户协作档案（基础模板）
+
+- 用户称呼：${persona_user_name}
+- 时区：${persona_timezone}
+- 所在地：${persona_location}
+- 主要目标：${persona_goal}
+
+## 协作偏好
+1. 先结论后细节，优先结构化输出。
+2. 减少碎片化回复，尽量一次回复完整信息。
+3. 高风险命令（删除、重置、对外发布、转账、推送）必须确认后执行。
+4. 默认不暴露内部密钥、配置细节和敏感数据。
+
+## 维护规则
+- 本文件作为基础模板，后续可由用户确认后增改。
+EOF
+
+    cat > "$persona_identity_file" <<EOF
+# IDENTITY.md - 机器人身份卡
+
+- Name: ${persona_agent_name}
+- Emoji: ${persona_agent_emoji}
+- Role: OpenClaw 综合助理（调度、执行、汇报）
+- Work Mode: ${persona_work_mode}
+- Language: 简体中文
+
+## 能力边界
+- 负责：任务拆解、工具调用、结果汇总、进度回报。
+- 不负责：越权访问、绕过平台限制、泄露敏感信息。
+
+## 绝对禁区
+- 不输出 API Key/Token/私钥/会话凭据。
+- 不执行绕过安全策略或权限边界的指令。
+- 不在未确认前执行不可逆高风险操作。
+EOF
+
     cat > "$policy_json" <<EOF
 {
   "version": 1,
@@ -1084,6 +1289,12 @@ EOF
     "agent": "${system_rule_file}",
     "memory": "${memory_rule_file}",
     "session": "${session_rule_file}"
+  },
+  "personaFiles": {
+    "soul": "${persona_soul_file}",
+    "agents": "${persona_agents_file}",
+    "user": "${persona_user_file}",
+    "identity": "${persona_identity_file}"
   }
 }
 EOF
@@ -1117,7 +1328,8 @@ EOF
 EOF
 
     chmod 600 "$policy_json" 2>/dev/null || true
-    chmod 644 "$system_rule_file" "$memory_rule_file" "$session_rule_file" "$soul_rule_file" "$prompt_file" 2>/dev/null || true
+    chmod 644 "$system_rule_file" "$memory_rule_file" "$session_rule_file" "$soul_rule_file" "$prompt_file" \
+      "$persona_soul_file" "$persona_agents_file" "$persona_user_file" "$persona_identity_file" 2>/dev/null || true
 
     if check_command openclaw; then
         openclaw config set "vendor.control.profile" "$level" >/dev/null 2>&1 || true
@@ -1127,6 +1339,11 @@ EOF
         openclaw config set "vendor.control.files.session" "$session_rule_file" >/dev/null 2>&1 || true
         openclaw config set "vendor.control.files.policy" "$policy_json" >/dev/null 2>&1 || true
         openclaw config set "vendor.control.files.prompts" "$prompt_file" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.files.persona.soul" "$persona_soul_file" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.files.persona.agents" "$persona_agents_file" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.files.persona.user" "$persona_user_file" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.files.persona.identity" "$persona_identity_file" >/dev/null 2>&1 || true
+        openclaw config set "vendor.control.persona.enabled" true >/dev/null 2>&1 || true
         openclaw config set "boot-md.enabled" true >/dev/null 2>&1 || true
         openclaw config set "session-memory.enabled" true >/dev/null 2>&1 || true
     fi
@@ -1179,6 +1396,14 @@ normalize_install_options() {
         exit 2
     fi
 
+    if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        NO_PROMPT=1
+        NO_ONBOARD=1
+        if [ -z "${OPENCLAW_RULE_PROFILE:-}" ]; then
+            RULE_PROFILE_SELECTED="low"
+        fi
+    fi
+
     if [ "$USE_BETA" = "1" ]; then
         local beta_version
         beta_version="$(resolve_beta_version)"
@@ -1191,15 +1416,22 @@ normalize_install_options() {
         fi
     fi
 
-    # 规范化 Gateway 地址参数，默认绑定 127.0.0.1:13145
-    if [ -z "$GATEWAY_HOST" ]; then
-        GATEWAY_HOST="127.0.0.1"
+    # 规范化 Gateway 绑定参数，按官方语义使用 bind + port
+    GATEWAY_BIND="$(normalize_gateway_bind_mode "$GATEWAY_BIND" "$GATEWAY_HOST")"
+    if [ "$GATEWAY_BIND" = "custom" ] && [ -z "$GATEWAY_CUSTOM_BIND_HOST" ] && [ -n "$GATEWAY_HOST" ]; then
+        GATEWAY_CUSTOM_BIND_HOST="$GATEWAY_HOST"
     fi
+    if [ "$GATEWAY_BIND" != "custom" ]; then
+        GATEWAY_CUSTOM_BIND_HOST=""
+    fi
+    GATEWAY_HOST="$(get_gateway_bind_display_host_install "$GATEWAY_BIND" "$GATEWAY_CUSTOM_BIND_HOST")"
     if ! [[ "$GATEWAY_PORT" =~ ^[0-9]+$ ]] || [ "$GATEWAY_PORT" -lt 1 ] || [ "$GATEWAY_PORT" -gt 65535 ]; then
         log_warn "无效 gateway 端口: $GATEWAY_PORT，回退到默认 13145"
         GATEWAY_PORT="13145"
     fi
+    export OPENCLAW_GATEWAY_BIND="$GATEWAY_BIND"
     export OPENCLAW_GATEWAY_HOST="$GATEWAY_HOST"
+    export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST="$GATEWAY_CUSTOM_BIND_HOST"
     export OPENCLAW_GATEWAY_PORT="$GATEWAY_PORT"
     RESET_CHAT_AFTER_INSTALL="$(normalize_bool_flag "$RESET_CHAT_AFTER_INSTALL" "1")"
     export OPENCLAW_RESET_CHAT_AFTER_INSTALL="$RESET_CHAT_AFTER_INSTALL"
@@ -1214,9 +1446,12 @@ print_install_plan() {
     echo "  - openclaw_version: $OPENCLAW_VERSION"
     echo "  - no_onboard: $NO_ONBOARD"
     echo "  - no_prompt: $NO_PROMPT"
+    echo "  - auto_confirm_all: $AUTO_CONFIRM_ALL"
     echo "  - dry_run: $DRY_RUN"
     echo "  - verbose: $VERBOSE"
-    echo "  - gateway_host: $GATEWAY_HOST"
+    echo "  - gateway_bind: $GATEWAY_BIND"
+    [ -n "$GATEWAY_CUSTOM_BIND_HOST" ] && echo "  - gateway_custom_host: $GATEWAY_CUSTOM_BIND_HOST"
+    echo "  - gateway_host_display: $GATEWAY_HOST"
     echo "  - gateway_port: $GATEWAY_PORT"
     echo "  - reset_chat_after_install: $RESET_CHAT_AFTER_INSTALL"
     echo "  - rule_profile: $RULE_PROFILE_SELECTED"
@@ -1584,6 +1819,8 @@ create_directories() {
 
 install_openclaw_via_official() {
     local -a args
+    local low_mem_guard=0
+    local scoped_node_opts="${NODE_OPTIONS:-}"
     args=(--install-method "$INSTALL_METHOD" --no-onboard)
 
     if [ "$NO_PROMPT" = "1" ]; then
@@ -1614,7 +1851,18 @@ install_openclaw_via_official() {
         rm -f "$tmp_script" 2>/dev/null || true
         return 1
     fi
-    bash "$tmp_script" "${args[@]}"
+
+    # 低内存机器提前启用保护，降低官方安装器内部 npm OOM 概率
+    if is_low_memory_linux; then
+        ensure_swap_for_install || true
+        low_mem_guard=1
+    fi
+    if [ "$low_mem_guard" -eq 1 ]; then
+        scoped_node_opts="${scoped_node_opts:+${scoped_node_opts} }--max-old-space-size=512"
+        env SHARP_IGNORE_GLOBAL_LIBVIPS=1 npm_config_jobs=1 npm_config_maxsockets=1 npm_config_progress=false UV_THREADPOOL_SIZE=1 NODE_OPTIONS="$scoped_node_opts" bash "$tmp_script" "${args[@]}"
+    else
+        bash "$tmp_script" "${args[@]}"
+    fi
     local install_exit=$?
     rm -f "$tmp_script" 2>/dev/null || true
     return "$install_exit"
@@ -2179,8 +2427,19 @@ cleanup_stale_plugin_state() {
         # 清理已知的陈旧插件配置项，避免 Config warnings
         openclaw config unset "plugins.entries.gemini" >/dev/null 2>&1 || true
         openclaw config unset "plugins.entries.nano-banana-pro" >/dev/null 2>&1 || true
+        openclaw config unset "plugins.entries.wechat" >/dev/null 2>&1 || true
+        openclaw config unset "plugins.entries.wecom" >/dev/null 2>&1 || true
+        openclaw config unset "plugins.entries.openclaw-wecom" >/dev/null 2>&1 || true
         openclaw config unset "plugins.entries.openclaw-channel-dingtalk" >/dev/null 2>&1 || true
+        # 清理历史错误 channel 键（插件 id 被误写入 channels.* 导致 Config invalid）
+        openclaw config unset "channels.wecom-openclaw-plugin" >/dev/null 2>&1 || true
+        openclaw config unset "channels.openclaw-wecom" >/dev/null 2>&1 || true
+        openclaw config unset "channels.openclaw-channel-dingtalk" >/dev/null 2>&1 || true
+        openclaw config unset "channels.openclaw-wechat-channel" >/dev/null 2>&1 || true
+        openclaw config unset "channels.openclaw-qqbot" >/dev/null 2>&1 || true
+        cleanup_unknown_plugin_entries_install || true
     fi
+    cleanup_stale_channel_keys_in_json_install || true
 
     # 清理历史飞书社区扩展目录，避免与官方 feishu 插件重复加载
     local legacy_dir
@@ -2190,6 +2449,179 @@ cleanup_stale_plugin_state() {
             log_warn "已清理历史飞书扩展残留: $legacy_dir"
         fi
     done
+}
+
+cleanup_stale_channel_keys_in_json_install() {
+    local cfg="$CONFIG_DIR/openclaw.json"
+    [ -f "$cfg" ] || return 0
+    if check_command jq; then
+        local tmp
+        tmp="$(mktemp)"
+        if jq '
+            .channels = ((.channels // {})
+              | del(.["wecom-openclaw-plugin"])
+              | del(.["openclaw-wecom"])
+              | del(.["openclaw-channel-dingtalk"])
+              | del(.["openclaw-wechat-channel"])
+              | del(.["openclaw-qqbot"]))
+        ' "$cfg" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+            mv "$tmp" "$cfg"
+            return 0
+        fi
+        rm -f "$tmp" 2>/dev/null || true
+    fi
+    if check_command python3; then
+        python3 - "$cfg" <<'PY' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+drop = {"wecom-openclaw-plugin","openclaw-wecom","openclaw-channel-dingtalk","openclaw-wechat-channel","openclaw-qqbot"}
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    ch = data.get("channels") or {}
+    if isinstance(ch, dict):
+        for k in drop:
+            ch.pop(k, None)
+        data["channels"] = ch
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+except Exception:
+    pass
+PY
+    fi
+}
+
+apply_default_feishu_runtime_flags() {
+    if ! check_command openclaw; then
+        return 0
+    fi
+    openclaw config set channels.feishu.streaming true >/dev/null 2>&1 || true
+    openclaw config set channels.feishu.footer.elapsed true >/dev/null 2>&1 || true
+    openclaw config set channels.feishu.footer.status true >/dev/null 2>&1 || true
+}
+
+openclaw_plugins_install_with_retry_install() {
+    local source_spec="$1"
+    local attempts="${PLUGIN_INSTALL_RETRIES:-2}"
+    local backoff="${PLUGIN_INSTALL_BACKOFF_SECONDS:-2}"
+    local attempt=1
+
+    if ! [[ "$attempts" =~ ^[0-9]+$ ]] || [ "$attempts" -lt 1 ]; then
+        attempts=1
+    fi
+    if ! [[ "$backoff" =~ ^[0-9]+$ ]] || [ "$backoff" -lt 1 ]; then
+        backoff=1
+    fi
+
+    while [ "$attempt" -le "$attempts" ]; do
+        if openclaw plugins install "$source_spec" --pin >/dev/null 2>&1 || openclaw plugins install "$source_spec" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$attempt" -lt "$attempts" ]; then
+            sleep $((backoff * attempt))
+        fi
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+get_plugins_entries_keys_install() {
+    local config_json="$CONFIG_DIR/openclaw.json"
+    [ -f "$config_json" ] || return 0
+
+    if check_command jq; then
+        jq -r '.plugins.entries // {} | keys[]' "$config_json" 2>/dev/null || true
+        return 0
+    fi
+
+    if check_command python3; then
+        python3 - "$config_json" <<'PY' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    for k in (data.get("plugins", {}).get("entries", {}) or {}).keys():
+        print(k)
+except Exception:
+    pass
+PY
+        return 0
+    fi
+
+    if check_command node; then
+        node -e '
+const fs=require("fs");
+try{
+  const d=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  Object.keys((d.plugins&&d.plugins.entries)||{}).forEach(k=>console.log(k));
+}catch(e){}
+' "$config_json" 2>/dev/null || true
+    fi
+}
+
+plugin_entry_candidate_ids_install() {
+    local entry_id="$1"
+    case "$entry_id" in
+        wecom-openclaw-plugin) echo "wecom-openclaw-plugin wecom @wecom/wecom-openclaw-plugin" ;;
+        openclaw-wechat-channel|wechat) echo "openclaw-wechat-channel wechat" ;;
+        openclaw-qqbot|qqbot) echo "qqbot openclaw-qqbot @sliverp/qqbot @tencent-connect/openclaw-qqbot" ;;
+        dingtalk) echo "dingtalk openclaw-channel-dingtalk @openclaw-china/channels" ;;
+        feishu) echo "feishu @openclaw/feishu" ;;
+        *) echo "$entry_id" ;;
+    esac
+}
+
+is_plugin_entry_available_install() {
+    local entry_id="$1"
+    local candidate=""
+    for candidate in $(plugin_entry_candidate_ids_install "$entry_id"); do
+        [ -n "$candidate" ] || continue
+        if openclaw plugins info "$candidate" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+is_legacy_plugin_entry_alias_install() {
+    local entry_id="$1"
+    case "$entry_id" in
+        wechat|wecom|openclaw-wecom|openclaw-channel-dingtalk)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+cleanup_unknown_plugin_entries_install() {
+    local key=""
+    local removed=0
+    local inspected=0
+    local keys
+    keys="$(get_plugins_entries_keys_install)"
+    [ -n "$keys" ] || return 0
+
+    while IFS= read -r key; do
+        [ -n "$key" ] || continue
+        inspected=$((inspected + 1))
+        if is_legacy_plugin_entry_alias_install "$key"; then
+            openclaw config unset "plugins.entries.$key" >/dev/null 2>&1 || true
+            removed=$((removed + 1))
+            continue
+        fi
+        if is_plugin_entry_available_install "$key"; then
+            continue
+        fi
+        openclaw config unset "plugins.entries.$key" >/dev/null 2>&1 || true
+        removed=$((removed + 1))
+    done <<< "$keys"
+
+    if [ "$removed" -gt 0 ]; then
+        log_warn "已清理 ${removed}/${inspected} 个无效插件配置项（plugins.entries.*），减少启动告警。"
+    fi
 }
 
 install_default_official_plugins() {
@@ -2209,7 +2641,7 @@ install_default_official_plugins() {
 
     cleanup_stale_plugin_state
 
-    log_step "同步默认消息渠道插件集（优先官方源，其次仓库本地包）..."
+    log_step "同步默认消息渠道插件集（优先仓库本地包，其次远端兜底）..."
     local ok=0
     local fail=0
     local builtins_ok=0
@@ -2225,28 +2657,18 @@ install_default_official_plugins() {
             continue
         fi
 
-        # 2) 优先尝试官方源安装
-        if openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1; then
-            openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
-            ok=$((ok + 1))
-            continue
-        fi
-
-        # 3) 官方源失败时再尝试从仓库本地包安装
+        # 2) 优先尝试从仓库本地包安装，避免公网慢速/失败拖慢安装
         local_source="$(resolve_official_plugin_local_source_install "$spec" "$bundle_dir" 2>/dev/null || true)"
         if [ -n "$local_source" ]; then
-            if openclaw plugins install "$local_source" --pin >/dev/null 2>&1 || openclaw plugins install "$local_source" >/dev/null 2>&1; then
+            if openclaw_plugins_install_with_retry_install "$local_source"; then
                 openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
                 ok=$((ok + 1))
                 continue
             fi
-            fail=$((fail + 1))
-            continue
         fi
 
-        # 4) 如显式允许远端兜底，则最后再尝试一次在线安装
-        if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && \
-           (openclaw plugins install "$spec" --pin >/dev/null 2>&1 || openclaw plugins install "$spec" >/dev/null 2>&1); then
+        # 3) 本地包缺失或安装失败时，再按需尝试远端兜底
+        if [ "${OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK:-0}" = "1" ] && openclaw_plugins_install_with_retry_install "$spec"; then
             openclaw plugins enable "$plugin_alias" >/dev/null 2>&1 || true
             ok=$((ok + 1))
         else
@@ -2266,6 +2688,7 @@ install_default_official_plugins() {
     done
 
     log_info "默认消息渠道插件安装完成：包安装成功 ${ok}，包安装失败 ${fail}，内置启用成功 ${builtins_ok}，内置跳过 ${builtins_skip}"
+    cleanup_unknown_plugin_entries_install || true
 }
 
 plugin_bundle_slug_from_spec_install() {
@@ -2287,9 +2710,10 @@ plugin_enable_alias_from_spec_install() {
     case "$spec" in
         @wecom/wecom-openclaw-plugin* ) echo "wecom-openclaw-plugin" ;;
         @openclaw-china/wecom* ) echo "wecom" ;;
-        openclaw-wechat-channel* ) echo "wechat" ;;
+        openclaw-wechat-channel* ) echo "openclaw-wechat-channel" ;;
         openclaw-channel-dingtalk* ) echo "dingtalk" ;;
         @sliverp/qqbot* ) echo "qqbot" ;;
+        @tencent-connect/openclaw-qqbot* ) echo "openclaw-qqbot" ;;
         @openclaw/* )
             local alias="${spec#@openclaw/}"
             alias="${alias%@*}"
@@ -2301,12 +2725,72 @@ plugin_enable_alias_from_spec_install() {
     esac
 }
 
+plugin_spec_base_install() {
+    local spec="$1"
+    echo "${spec%@*}"
+}
+
+resolve_plugin_source_from_manifest_install() {
+    local plugin_spec="$1"
+    local bundle_dir="$2"
+    local manifest_file="$bundle_dir/manifest.json"
+    local spec_base rel candidate
+
+    [ -f "$manifest_file" ] || return 1
+    spec_base="$(plugin_spec_base_install "$plugin_spec")"
+
+    if check_command jq; then
+        while IFS= read -r rel; do
+            [ -n "$rel" ] || continue
+            candidate="$bundle_dir/$rel"
+            [ -e "$candidate" ] || continue
+            echo "$candidate"
+            return 0
+        done < <(jq -r --arg s "$spec_base" '
+            (.entries // [])
+            | map(select(((.spec // .package // "") == $s)))
+            | .[] | (.files // [])[]
+        ' "$manifest_file" 2>/dev/null || true)
+    elif check_command python3; then
+        while IFS= read -r rel; do
+            [ -n "$rel" ] || continue
+            candidate="$bundle_dir/$rel"
+            [ -e "$candidate" ] || continue
+            echo "$candidate"
+            return 0
+        done < <(python3 - "$manifest_file" "$spec_base" <<'PY' 2>/dev/null || true
+import json, sys
+path, spec = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path, "r", encoding="utf-8"))
+except Exception:
+    data = {}
+for entry in data.get("entries", []) or []:
+    ident = entry.get("spec") or entry.get("package") or ""
+    if ident != spec:
+        continue
+    for f in (entry.get("files") or []):
+        if f:
+            print(f)
+PY
+)
+    fi
+
+    return 1
+}
+
 resolve_official_plugin_local_source_install() {
     local plugin_spec="$1"
     local bundle_dir="$2"
     local slug
     local pack_name
     local candidate
+
+    candidate="$(resolve_plugin_source_from_manifest_install "$plugin_spec" "$bundle_dir" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -e "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
 
     slug="$(plugin_bundle_slug_from_spec_install "$plugin_spec")"
     pack_name="$(plugin_bundle_pack_name_from_spec_install "$plugin_spec")"
@@ -2432,20 +2916,28 @@ init_openclaw_config() {
     # 设置 gateway.mode 为 local
     if check_command openclaw; then
         openclaw config set gateway.mode local 2>/dev/null || true
-        openclaw config set gateway.host "$GATEWAY_HOST" 2>/dev/null || true
+        openclaw config set gateway.bind "$GATEWAY_BIND" 2>/dev/null || true
+        [ "$GATEWAY_BIND" = "custom" ] && [ -n "$GATEWAY_CUSTOM_BIND_HOST" ] && \
+            openclaw config set gateway.customBindHost "$GATEWAY_CUSTOM_BIND_HOST" 2>/dev/null || true
         openclaw config set gateway.port "$GATEWAY_PORT" 2>/dev/null || true
-        openclaw config set gateway.bind "$GATEWAY_HOST:$GATEWAY_PORT" 2>/dev/null || true
-        log_info "Gateway 模式已设置为 local"
-        
-        # 检查 gateway.auth 配置，如果是 token 模式但没有 token，则自动生成
-        local auth_mode=$(openclaw config get gateway.auth 2>/dev/null)
+        log_info "Gateway 模式已设置为 local（bind=${GATEWAY_BIND}, port=${GATEWAY_PORT}）"
+
+        local auth_mode
+        auth_mode="$(openclaw config get gateway.auth.mode 2>/dev/null || true)"
+        auth_mode="$(echo "$auth_mode" | tr -d '"'\''[:space:]')"
+        if [ -z "$auth_mode" ] || [ "$auth_mode" = "undefined" ]; then
+            openclaw config set gateway.auth.mode token 2>/dev/null || true
+            auth_mode="token"
+        fi
         if [ "$auth_mode" = "token" ]; then
-            local auth_token=$(openclaw config get gateway.auth.token 2>/dev/null)
+            local auth_token
+            auth_token="$(openclaw config get gateway.auth.token 2>/dev/null || true)"
+            auth_token="$(echo "$auth_token" | tr -d '"'\''[:space:]')"
             if [ -z "$auth_token" ] || [ "$auth_token" = "undefined" ]; then
-                # 自动生成一个随机 token
-                local new_token=$(openssl rand -hex 32 2>/dev/null || cat /dev/urandom | head -c 32 | xxd -p 2>/dev/null || date +%s%N | sha256sum | head -c 64)
+                local new_token
+                new_token="$(openssl rand -hex 32 2>/dev/null || cat /dev/urandom | head -c 32 | xxd -p 2>/dev/null || date +%s%N | sha256sum | head -c 64)"
                 openclaw config set gateway.auth.token "$new_token" 2>/dev/null || true
-                log_info "已自动生成 Gateway Auth Token"
+                log_info "已初始化并持久化 Gateway Token，用于远程隧道/反向代理访问。"
             fi
         fi
     fi
@@ -2458,6 +2950,18 @@ init_openclaw_config() {
             echo "# Gateway runtime defaults"
         } >> "$env_file"
     fi
+    if grep -q '^export OPENCLAW_GATEWAY_BIND=' "$env_file" 2>/dev/null; then
+        local tmp_env_bind
+        tmp_env_bind="$(mktemp)"
+        awk -v v="$GATEWAY_BIND" '
+            BEGIN { done=0 }
+            /^export OPENCLAW_GATEWAY_BIND=/ { print "export OPENCLAW_GATEWAY_BIND=" v; done=1; next }
+            { print }
+            END { if (!done) print "export OPENCLAW_GATEWAY_BIND=" v }
+        ' "$env_file" > "$tmp_env_bind" && mv "$tmp_env_bind" "$env_file"
+    else
+        echo "export OPENCLAW_GATEWAY_BIND=$GATEWAY_BIND" >> "$env_file"
+    fi
     if grep -q '^export OPENCLAW_GATEWAY_HOST=' "$env_file" 2>/dev/null; then
         local tmp_env
         tmp_env="$(mktemp)"
@@ -2469,6 +2973,20 @@ init_openclaw_config() {
         ' "$env_file" > "$tmp_env" && mv "$tmp_env" "$env_file"
     else
         echo "export OPENCLAW_GATEWAY_HOST=$GATEWAY_HOST" >> "$env_file"
+    fi
+    if [ -n "$GATEWAY_CUSTOM_BIND_HOST" ]; then
+        if grep -q '^export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=' "$env_file" 2>/dev/null; then
+            local tmp_env_custom
+            tmp_env_custom="$(mktemp)"
+            awk -v v="$GATEWAY_CUSTOM_BIND_HOST" '
+                BEGIN { done=0 }
+                /^export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=/ { print "export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=" v; done=1; next }
+                { print }
+                END { if (!done) print "export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=" v }
+            ' "$env_file" > "$tmp_env_custom" && mv "$tmp_env_custom" "$env_file"
+        else
+            echo "export OPENCLAW_GATEWAY_CUSTOM_BIND_HOST=$GATEWAY_CUSTOM_BIND_HOST" >> "$env_file"
+        fi
     fi
     if grep -q '^export OPENCLAW_GATEWAY_PORT=' "$env_file" 2>/dev/null; then
         local tmp_env2
@@ -2693,7 +3211,11 @@ EOF
             ;;
     esac
 
+    upsert_env_export_install "OPENCLAW_GATEWAY_BIND" "$GATEWAY_BIND"
     upsert_env_export_install "OPENCLAW_GATEWAY_HOST" "$GATEWAY_HOST"
+    if [ -n "$GATEWAY_CUSTOM_BIND_HOST" ]; then
+        upsert_env_export_install "OPENCLAW_GATEWAY_CUSTOM_BIND_HOST" "$GATEWAY_CUSTOM_BIND_HOST"
+    fi
     upsert_env_export_install "OPENCLAW_GATEWAY_PORT" "$GATEWAY_PORT"
     
     chmod 600 "$env_file"
@@ -3133,7 +3655,7 @@ run_onboard_wizard() {
     
     # 检查是否已有配置
     local skip_ai_config=false
-    local skip_identity_config=false
+    local api_test_done=false
     local env_file="$HOME/.openclaw/env"
     
     if [ -f "$env_file" ]; then
@@ -3198,6 +3720,7 @@ run_onboard_wizard() {
                     AI_KEY="$ZAI_API_KEY"
                 fi
                 test_api_connection
+                api_test_done=true
             fi
         fi
         
@@ -3219,8 +3742,9 @@ run_onboard_wizard() {
         test_api_connection
     else
         # 即使跳过配置，也可选择测试连接
-        if confirm "是否测试现有 API 连接？" "y"; then
+        if [ "$api_test_done" = false ] && confirm "是否测试现有 API 连接？" "y"; then
             test_api_connection
+            api_test_done=true
         fi
     fi
     
@@ -4031,13 +4555,15 @@ converge_gateway_single_instance() {
         return 1
     fi
 
-    log_step "收敛 Gateway 为单实例（${GATEWAY_HOST}:${GATEWAY_PORT}）..."
+    log_step "收敛 Gateway 为单实例（bind=${GATEWAY_BIND}, port=${GATEWAY_PORT}）..."
     cleanup_legacy_gateway_runtime
 
     openclaw config set gateway.mode local >/dev/null 2>&1 || true
-    openclaw config set gateway.host "$GATEWAY_HOST" >/dev/null 2>&1 || true
+    openclaw config set gateway.bind "$GATEWAY_BIND" >/dev/null 2>&1 || true
+    if [ "$GATEWAY_BIND" = "custom" ] && [ -n "$GATEWAY_CUSTOM_BIND_HOST" ]; then
+        openclaw config set gateway.customBindHost "$GATEWAY_CUSTOM_BIND_HOST" >/dev/null 2>&1 || true
+    fi
     openclaw config set gateway.port "$GATEWAY_PORT" >/dev/null 2>&1 || true
-    openclaw config set gateway.bind "$GATEWAY_HOST:$GATEWAY_PORT" >/dev/null 2>&1 || true
     init_openclaw_config
 
     if ! install_official_gateway_service; then
@@ -4063,7 +4589,7 @@ converge_gateway_single_instance() {
     fi
 
     if [ -n "$gateway_pid" ]; then
-        log_info "Gateway 已单实例运行 (PID: $gateway_pid, 端口: $GATEWAY_PORT)"
+        log_info "Gateway 已单实例运行 (PID: $gateway_pid, bind=${GATEWAY_BIND}, port=${GATEWAY_PORT})"
         openclaw gateway status 2>/dev/null | head -8 | sed 's/^/  /' || true
         return 0
     fi
@@ -4276,9 +4802,8 @@ main() {
         exit 1
     fi
     cleanup_stale_plugin_state
-    if ! run_step_with_auto_fix "同步默认消息渠道插件（官方优先+本地兜底）" install_default_official_plugins; then
-        log_warn "默认消息渠道插件同步未完全成功，可稍后在配置菜单中重试。"
-    fi
+    apply_default_feishu_runtime_flags
+    log_info "默认消息渠道插件自动安装已关闭（改为手动安装，避免安装阶段耗时与失败重试）。"
     if [ "$NO_ONBOARD" = "1" ]; then
         log_info "已按参数跳过 AI 初始化向导 (--no-onboard)"
     else
@@ -4286,19 +4811,22 @@ main() {
             log_warn "安装后配置向导未完成，可稍后手动运行: openclaw onboard"
         fi
     fi
-    setup_identity
+    apply_default_feishu_runtime_flags
+    log_info "已禁用安装阶段机器人初始化设置，保持 OpenClaw 默认身份配置。"
     apply_vendor_rule_profile
     apply_default_security_baseline
+    cleanup_stale_plugin_state
     reset_gateway_chat_history_for_fresh_start
     if ! run_step_with_auto_fix "设置开机守护进程" setup_daemon; then
-        log_error "守护进程设置失败"
-        exit 1
+        log_warn "守护进程设置失败，安装继续完成；稍后可手动执行: openclaw gateway install --force --port ${GATEWAY_PORT}"
     fi
     print_success
     
     # 询问是否启动服务
     if confirm "是否现在启动 OpenClaw 服务？" "y"; then
-        start_openclaw_service
+        if ! start_openclaw_service; then
+            log_warn "安装已完成，但 Gateway 暂未成功启动。可稍后执行: openclaw doctor --fix && openclaw gateway restart"
+        fi
     else
         echo ""
         echo -e "${CYAN}稍后可以通过以下命令启动服务:${NC}"
@@ -4318,7 +4846,9 @@ main() {
     echo -e "   ${CYAN}bash ./config-menu.sh${NC}"
     echo ""
     if confirm "是否现在打开配置菜单？" "n"; then
-        run_config_menu
+        if ! run_config_menu; then
+            log_warn "配置菜单启动失败或被中断，可稍后手动运行: bash ./config-menu.sh"
+        fi
     else
         echo ""
         echo -e "${CYAN}稍后可以通过以下命令打开配置菜单:${NC}"
