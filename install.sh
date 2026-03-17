@@ -327,7 +327,7 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --no-onboard                         跳过本脚本 AI 初始化向导
   --onboard                            强制执行本脚本 AI 初始化向导
   --no-prompt                          非交互模式（使用默认值）
-  --auto-confirm-all, --fast-install   全自动模式（所有确认默认通过，选择题默认 1；官方仅执行模型配置，其它官方步骤跳过）
+  --auto-confirm-all, --fast-install   全自动模式（所有确认默认通过，选择题默认 1，等价 no-prompt + no-onboard）
   --dry-run                            只显示执行计划，不做变更
   --verbose                            详细日志
   --gateway-host <host>               Gateway 监听地址 (默认: 127.0.0.1)
@@ -427,7 +427,7 @@ parse_args() {
             --auto-confirm-all|--fast-install)
                 AUTO_CONFIRM_ALL=1
                 NO_PROMPT=1
-                NO_ONBOARD=0
+                NO_ONBOARD=1
                 shift
                 ;;
             --dry-run)
@@ -1398,7 +1398,7 @@ normalize_install_options() {
 
     if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
         NO_PROMPT=1
-        NO_ONBOARD=0
+        NO_ONBOARD=1
         if [ -z "${OPENCLAW_RULE_PROFILE:-}" ]; then
             RULE_PROFILE_SELECTED="low"
         fi
@@ -3845,22 +3845,6 @@ run_onboard_wizard() {
 
     if confirm "使用官方配置向导 openclaw onboard（推荐，模型列表与官方同步）？" "y"; then
         if run_step_with_auto_fix "官方配置向导" run_official_onboard; then
-            echo ""
-            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo -e "${WHITE}  第 2 步: 非官方消息渠道配置（社区）${NC}"
-            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-            echo ""
-            if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
-                log_info "全自动模式：已跳过非官方消息渠道配置菜单。"
-                log_info "如需配置渠道，请稍后手动执行: bash ./config-menu.sh"
-                log_info "官方配置流程完成。"
-                return 0
-            fi
-            if confirm "现在进入非官方消息渠道配置（社区）？" "y"; then
-                if ! run_step_with_auto_fix "非官方消息渠道配置菜单" run_config_menu --channels-only; then
-                    log_warn "非官方消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
-                fi
-            fi
             log_info "官方配置流程完成。"
             return 0
         fi
@@ -3949,7 +3933,6 @@ run_onboard_wizard() {
         echo "  1. 选择 AI 模型提供商"
         echo "  2. 配置 API 连接"
         echo "  3. 测试 API 连接"
-        echo "  4. 非官方消息渠道配置（社区）"
         echo ""
     fi
     
@@ -3967,19 +3950,7 @@ run_onboard_wizard() {
         fi
     fi
     
-    # 模型配置完成后，自动进入非官方消息渠道配置
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}  第 3 步: 非官方消息渠道配置（社区）${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    if confirm "现在进入非官方消息渠道配置（社区）？" "y"; then
-        if ! run_config_menu --channels-only; then
-            log_warn "非官方消息渠道配置菜单启动失败，可稍后手动运行: bash ./config-menu.sh"
-        fi
-    fi
-
-    log_info "模型与非官方消息渠道配置流程已完成！"
+    log_info "模型配置流程已完成！"
 }
 
 # ================================ AI Provider 配置 ================================
@@ -4598,7 +4569,6 @@ ${welcome_text}
 
 ## 渠道配置入口
 - 命令: \`bash ~/.openclaw/config-menu.sh\`
-- 主菜单: 3 官方消息渠道插件 / 4 非官方消息渠道配置
 - 文档:
   - ${WELCOME_DOC_URL_GITEE}
   - ${WELCOME_DOC_URL_GITHUB}
@@ -4630,7 +4600,7 @@ build_post_install_welcome_message() {
 ${welcome_text}
 
 渠道配置入口：
-- bash ~/.openclaw/config-menu.sh（主菜单 3/4）
+- bash ~/.openclaw/config-menu.sh
 - ${WELCOME_DOC_URL_GITEE}
 - ${WELCOME_DOC_URL_GITHUB}
 EOF
@@ -5091,15 +5061,19 @@ main() {
     echo -e "${WHITE}💡 下次可以直接运行配置菜单:${NC}"
     echo -e "   ${CYAN}bash ./config-menu.sh${NC}"
     echo ""
-    if confirm "是否现在打开配置菜单？" "n"; then
-        if ! run_config_menu; then
-            log_warn "配置菜单启动失败或被中断，可稍后手动运行: bash ./config-menu.sh"
-        fi
+    if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        log_info "全自动模式：已跳过配置菜单，请按需手动执行: bash ./config-menu.sh"
     else
-        echo ""
-        echo -e "${CYAN}稍后可以通过以下命令打开配置菜单:${NC}"
-        echo "  bash ./config-menu.sh"
-        echo ""
+        if confirm "是否现在打开配置菜单？" "n"; then
+            if ! run_config_menu; then
+                log_warn "配置菜单启动失败或被中断，可稍后手动运行: bash ./config-menu.sh"
+            fi
+        else
+            echo ""
+            echo -e "${CYAN}稍后可以通过以下命令打开配置菜单:${NC}"
+            echo "  bash ./config-menu.sh"
+            echo ""
+        fi
     fi
     
     echo ""
