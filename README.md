@@ -11,7 +11,7 @@
 > ```
 > **配置命令（安装后立即执行）**
 > ```bash
-> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash
+> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
 > ```
 > **多源容灾安装（备用）**
 > ```bash
@@ -21,6 +21,7 @@
 > ```bash
 > bash -c 'set -e; tmp="$(mktemp)"; for u in "https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh" "https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leecyno1/auto-install-Openclaw/main/config-menu.sh" "https://cdn.jsdelivr.net/gh/leecyno1/auto-install-Openclaw@main/config-menu.sh"; do echo "Try: $u"; if curl -fsSL --proto "=https" --tlsv1.2 --connect-timeout 8 --max-time 25 "$u" -o "$tmp"; then bash "$tmp"; rm -f "$tmp"; exit 0; fi; done; rm -f "$tmp"; echo "All sources failed. 请稍后重试或更换网络。"; exit 1'
 > ```
+> **2026-03-17 更新**：已修复 Dashboard 远程访问 `pairing required`（默认关闭 Control UI 设备配对拦截，保留 token 鉴权）。
 
 <p align="center">
   <img src="photo/openclaw-installer-logo.svg" alt="auto-install-Openclaw Logo" width="780" />
@@ -157,7 +158,7 @@ curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://
 ### 配置命令（建议紧接安装执行）
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
 ```
 
 ### 配置命令（多源容灾备用）

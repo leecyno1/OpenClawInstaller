@@ -1605,6 +1605,7 @@ converge_gateway_single_instance_menu() {
         openclaw config set gateway.customBindHost "$gateway_custom_host" >/dev/null 2>&1 || true
     fi
     openclaw config set gateway.port "$gateway_port" >/dev/null 2>&1 || true
+    apply_dashboard_pairing_bypass_menu
     upsert_env_export "OPENCLAW_GATEWAY_BIND" "$gateway_bind"
     upsert_env_export "OPENCLAW_GATEWAY_HOST" "$(gateway_bind_display_host "$gateway_bind" "$gateway_custom_host")"
     if [ -n "$gateway_custom_host" ]; then
@@ -6282,6 +6283,12 @@ normalize_channel_policy_in_json_menu() {
         mkdir -p "$(dirname "$cfg")" 2>/dev/null || true
         cat > "$cfg" <<'EOF'
 {
+  "gateway": {
+    "controlUi": {
+      "allowInsecureAuth": true,
+      "dangerouslyDisableDeviceAuth": true
+    }
+  },
   "channels": {
     "feishu": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
     "telegram": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
@@ -6295,6 +6302,10 @@ EOF
         local tmp
         tmp="$(mktemp)"
         if jq '
+            .gateway = (.gateway // {})
+            | .gateway.controlUi = (.gateway.controlUi // {})
+            | .gateway.controlUi.allowInsecureAuth = true
+            | .gateway.controlUi.dangerouslyDisableDeviceAuth = true
             .channels = (.channels // {})
             | (.channels.feishu //= {})
             | (.channels.telegram //= {})
@@ -6330,6 +6341,16 @@ channels = ("feishu", "telegram", "whatsapp", "imessage")
 try:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    gateway = data.get("gateway") or {}
+    if not isinstance(gateway, dict):
+        gateway = {}
+    control_ui = gateway.get("controlUi") or {}
+    if not isinstance(control_ui, dict):
+        control_ui = {}
+    control_ui["allowInsecureAuth"] = True
+    control_ui["dangerouslyDisableDeviceAuth"] = True
+    gateway["controlUi"] = control_ui
+    data["gateway"] = gateway
     root = data.get("channels") or {}
     if not isinstance(root, dict):
         root = {}
@@ -6349,6 +6370,15 @@ except Exception:
     pass
 PY
     fi
+}
+
+apply_dashboard_pairing_bypass_menu() {
+    if ! check_openclaw_installed; then
+        return 0
+    fi
+    # 允许 Control UI 远程浏览器隧道使用 token 直连，避免出现 dashboard pairing required。
+    openclaw config set gateway.controlUi.allowInsecureAuth true >/dev/null 2>&1 || true
+    openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true >/dev/null 2>&1 || true
 }
 
 apply_default_feishu_runtime_flags_menu() {
@@ -8106,6 +8136,7 @@ ensure_openclaw_init() {
     if [ "$current_bind" = "custom" ] && [ -n "$current_custom_host" ]; then
         openclaw config set gateway.customBindHost "$current_custom_host" 2>/dev/null || true
     fi
+    apply_dashboard_pairing_bypass_menu
 
     local auth_mode
     auth_mode=$(openclaw config get gateway.auth.mode 2>/dev/null || true)

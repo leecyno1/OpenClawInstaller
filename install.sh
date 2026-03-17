@@ -2648,6 +2648,12 @@ normalize_channel_policy_in_json_install() {
         mkdir -p "$(dirname "$cfg")" 2>/dev/null || true
         cat > "$cfg" <<'EOF'
 {
+  "gateway": {
+    "controlUi": {
+      "allowInsecureAuth": true,
+      "dangerouslyDisableDeviceAuth": true
+    }
+  },
   "channels": {
     "feishu": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
     "telegram": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
@@ -2661,6 +2667,10 @@ EOF
         local tmp
         tmp="$(mktemp)"
         if jq '
+            .gateway = (.gateway // {})
+            | .gateway.controlUi = (.gateway.controlUi // {})
+            | .gateway.controlUi.allowInsecureAuth = true
+            | .gateway.controlUi.dangerouslyDisableDeviceAuth = true
             .channels = (.channels // {})
             | (.channels.feishu //= {})
             | (.channels.telegram //= {})
@@ -2696,6 +2706,16 @@ channels = ("feishu","telegram","whatsapp","imessage")
 try:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    gateway = data.get("gateway") or {}
+    if not isinstance(gateway, dict):
+        gateway = {}
+    control_ui = gateway.get("controlUi") or {}
+    if not isinstance(control_ui, dict):
+        control_ui = {}
+    control_ui["allowInsecureAuth"] = True
+    control_ui["dangerouslyDisableDeviceAuth"] = True
+    gateway["controlUi"] = control_ui
+    data["gateway"] = gateway
     root = data.get("channels") or {}
     if not isinstance(root, dict):
         root = {}
@@ -2715,6 +2735,15 @@ except Exception:
     pass
 PY
     fi
+}
+
+apply_dashboard_pairing_bypass_install() {
+    if ! check_command openclaw; then
+        return 0
+    fi
+    # 禁用 Control UI 设备配对门槛，避免远程浏览器隧道反复出现 pairing required。
+    openclaw config set gateway.controlUi.allowInsecureAuth true >/dev/null 2>&1 || true
+    openclaw config set gateway.controlUi.dangerouslyDisableDeviceAuth true >/dev/null 2>&1 || true
 }
 
 apply_default_feishu_runtime_flags() {
@@ -3147,7 +3176,8 @@ init_openclaw_config() {
         [ "$GATEWAY_BIND" = "custom" ] && [ -n "$GATEWAY_CUSTOM_BIND_HOST" ] && \
             openclaw config set gateway.customBindHost "$GATEWAY_CUSTOM_BIND_HOST" 2>/dev/null || true
         openclaw config set gateway.port "$GATEWAY_PORT" 2>/dev/null || true
-        # 默认放开 DM 与群聊准入，避免新装后 dashboard/会话触发 pairing required
+        apply_dashboard_pairing_bypass_install
+        # 默认放开消息渠道 DM/群聊准入，避免渠道侧触发 pairing 审批
         openclaw config set channels.feishu.dmPolicy open 2>/dev/null || true
         openclaw config set channels.feishu.groupPolicy open 2>/dev/null || true
         openclaw config set channels.telegram.dmPolicy open 2>/dev/null || true
@@ -4800,6 +4830,7 @@ converge_gateway_single_instance() {
         openclaw config set gateway.customBindHost "$GATEWAY_CUSTOM_BIND_HOST" >/dev/null 2>&1 || true
     fi
     openclaw config set gateway.port "$GATEWAY_PORT" >/dev/null 2>&1 || true
+    apply_dashboard_pairing_bypass_install
 
     if ! install_official_gateway_service; then
         return 1
