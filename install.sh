@@ -2681,7 +2681,7 @@ EOF
             | .gateway.controlUi = (.gateway.controlUi // {})
             | .gateway.controlUi.allowInsecureAuth = true
             | .gateway.controlUi.dangerouslyDisableDeviceAuth = true
-            .channels = (.channels // {})
+            | .channels = (.channels // {})
             | (.channels.feishu //= {})
             | (.channels.telegram //= {})
             | (.channels.whatsapp //= {})

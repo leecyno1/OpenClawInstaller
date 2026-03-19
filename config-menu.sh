@@ -2308,6 +2308,10 @@ run_official_model_onboard() {
         log_error "OpenClaw 未安装"
         return 1
     fi
+    if ! repair_runtime_config_preserve_data 1; then
+        log_error "进入官方模型配置前的预修复失败"
+        return 1
+    fi
     cleanup_stale_plugin_state_menu || true
     echo ""
     log_info "启动官方模型配置向导: openclaw onboard"
@@ -6140,6 +6144,7 @@ cleanup_stale_plugin_state_menu() {
         openclaw config unset "channels.openclaw-wechat-channel" >/dev/null 2>&1 || true
         openclaw config unset "channels.openclaw-qqbot" >/dev/null 2>&1 || true
         cleanup_unknown_plugin_entries_menu || true
+        cleanup_unknown_plugins_allow_menu || true
     fi
     normalize_channel_policy_in_json_menu || true
 
@@ -6306,7 +6311,7 @@ EOF
             | .gateway.controlUi = (.gateway.controlUi // {})
             | .gateway.controlUi.allowInsecureAuth = true
             | .gateway.controlUi.dangerouslyDisableDeviceAuth = true
-            .channels = (.channels // {})
+            | .channels = (.channels // {})
             | (.channels.feishu //= {})
             | (.channels.telegram //= {})
             | (.channels.whatsapp //= {})
@@ -6424,6 +6429,33 @@ try{
     fi
 }
 
+get_plugins_allow_ids_menu() {
+    [ -f "$OPENCLAW_JSON" ] || return 0
+
+    if command -v jq >/dev/null 2>&1; then
+        jq -r '.plugins.allow // [] | .[]' "$OPENCLAW_JSON" 2>/dev/null || true
+        return 0
+    fi
+
+    if command -v python3 >/dev/null 2>&1; then
+        python3 - "$OPENCLAW_JSON" <<'PY' 2>/dev/null || true
+import json, sys
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    allow = (data.get("plugins", {}) or {}).get("allow", []) or []
+    if isinstance(allow, list):
+        for item in allow:
+            if isinstance(item, str) and item.strip():
+                print(item.strip())
+except Exception:
+    pass
+PY
+        return 0
+    fi
+}
+
 plugin_entry_candidate_ids_menu() {
     local entry_id="$1"
     case "$entry_id" in
@@ -6445,6 +6477,55 @@ is_plugin_entry_available_menu() {
             return 0
         fi
     done
+    return 1
+}
+
+remove_plugin_allow_only_menu() {
+    local plugin_id="$1"
+
+    if [ ! -f "$OPENCLAW_JSON" ]; then
+        return 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        python3 << PYEOF
+import json
+import os
+
+config_path = os.path.expanduser("$OPENCLAW_JSON")
+plugin_id = "$plugin_id"
+
+try:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+
+    plugins = config.get('plugins') or {}
+    allow = plugins.get('allow') or []
+    if isinstance(allow, list):
+        plugins['allow'] = [p for p in allow if p != plugin_id]
+    config['plugins'] = plugins
+
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+except Exception:
+    raise SystemExit(1)
+PYEOF
+        return $?
+    fi
+
+    local tmp_file
+    tmp_file="$(mktemp)"
+    jq --arg plugin "$plugin_id" '
+        .plugins //= {"allow": [], "entries": {}} |
+        .plugins.allow = ((.plugins.allow // []) | map(select(. != $plugin)))
+    ' "$OPENCLAW_JSON" > "$tmp_file"
+
+    if [ $? -eq 0 ] && [ -s "$tmp_file" ]; then
+        mv "$tmp_file" "$OPENCLAW_JSON"
+        return 0
+    fi
+
+    rm -f "$tmp_file"
     return 1
 }
 
@@ -6484,6 +6565,34 @@ cleanup_unknown_plugin_entries_menu() {
 
     if [ "$removed" -gt 0 ]; then
         log_warn "已清理 ${removed}/${inspected} 个无效插件配置项（plugins.entries.*）。"
+    fi
+}
+
+cleanup_unknown_plugins_allow_menu() {
+    local ids plugin_id
+    local removed=0
+    local inspected=0
+
+    ids="$(get_plugins_allow_ids_menu)"
+    [ -n "$ids" ] || return 0
+
+    while IFS= read -r plugin_id; do
+        [ -n "$plugin_id" ] || continue
+        inspected=$((inspected + 1))
+        if is_legacy_plugin_entry_alias_menu "$plugin_id"; then
+            remove_plugin_allow_only_menu "$plugin_id" || true
+            removed=$((removed + 1))
+            continue
+        fi
+        if is_plugin_entry_available_menu "$plugin_id"; then
+            continue
+        fi
+        remove_plugin_allow_only_menu "$plugin_id" || true
+        removed=$((removed + 1))
+    done <<< "$ids"
+
+    if [ "$removed" -gt 0 ]; then
+        log_warn "已清理 ${removed}/${inspected} 个无效插件授权项（plugins.allow）。"
     fi
 }
 
@@ -9008,6 +9117,70 @@ restore_runtime_config_backup() {
     return 0
 }
 
+repair_runtime_config_preserve_data() {
+    local auto_mode="${1:-0}"
+
+    if ! check_openclaw_installed; then
+        log_error "OpenClaw 未安装"
+        return 1
+    fi
+
+    if [ "$auto_mode" != "1" ]; then
+        clear_screen
+        print_header
+        echo -e "${WHITE}🩺 配置修复 / 迁移（保留记忆）${NC}"
+        print_divider
+        echo ""
+        echo "  • 清理失效的 plugins.entries / plugins.allow 残留"
+        echo "  • 修复 channels 默认策略与 Dashboard 登录相关配置"
+        echo "  • 执行 doctor 迁移/修复"
+        echo "  • 保留现有 memory、session、对话历史与 API Key"
+        echo ""
+        if ! confirm "确认开始修复当前配置？" "y"; then
+            log_info "已取消"
+            return 0
+        fi
+    fi
+
+    local backup_path doctor_output
+    backup_path="$(backup_runtime_config_for_upgrade)" || return 1
+    log_info "已创建修复前快照: $backup_path"
+
+    cleanup_stale_channel_keys_in_json_menu || true
+    cleanup_stale_plugin_state_menu || true
+    normalize_channel_policy_in_json_menu || true
+    apply_dashboard_pairing_bypass_menu || true
+    ensure_openclaw_init || true
+    apply_default_feishu_runtime_flags_menu || true
+
+    log_info "运行 doctor 迁移与修复..."
+    if openclaw doctor --help 2>/dev/null | grep -q -- "--non-interactive"; then
+        if ! doctor_output="$(openclaw doctor --non-interactive 2>&1)"; then
+            log_error "doctor 迁移失败，已恢复修复前快照"
+            echo "$doctor_output" | head -20 | sed 's/^/  /'
+            restore_runtime_config_backup "$backup_path" || true
+            return 1
+        fi
+    else
+        if ! doctor_output="$(yes | openclaw doctor --fix 2>&1)"; then
+            log_error "doctor --fix 失败，已恢复修复前快照"
+            echo "$doctor_output" | head -20 | sed 's/^/  /'
+            restore_runtime_config_backup "$backup_path" || true
+            return 1
+        fi
+    fi
+
+    if [ "$auto_mode" != "1" ]; then
+        echo ""
+        log_info "配置修复完成（未清理 memory / sessions / 对话）"
+        if confirm "是否立即重启 Gateway 使配置生效？" "y"; then
+            restart_gateway_for_channel || true
+        fi
+        press_enter
+    fi
+    return 0
+}
+
 run_openclaw_upgrade_pipeline() {
     if ! check_openclaw_installed; then
         log_error "OpenClaw 未安装"
@@ -9276,10 +9449,11 @@ advanced_settings() {
     print_menu_item "7" "卸载 OpenClaw" "🗑️"
     print_menu_item "8" "AI 自动修复 OpenClaw" "🛠️"
     print_menu_item "9" "token规划规则注入（低/中/高/跳过）" "🏭"
+    print_menu_item "10" "配置修复 / 迁移（保留记忆）" "🩺"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
     
-    echo -en "${YELLOW}请选择 [0-9]: ${NC}"
+    echo -en "${YELLOW}请选择 [0-10]: ${NC}"
     read choice < "$TTY_INPUT"
     
     case $choice in
@@ -9339,6 +9513,9 @@ advanced_settings() {
             ;;
         9)
             apply_vendor_rule_profile_menu
+            ;;
+        10)
+            repair_runtime_config_preserve_data
             ;;
         0)
             return
@@ -9899,6 +10076,7 @@ show_main_menu() {
     print_menu_item "9" "查看当前配置" "📋"
     print_menu_item "10" "身份与个性配置" "👤"
     print_menu_item "11" "服务管理" "⚡"
+    print_menu_item "12" "配置修复 / 迁移（保留记忆）" "🩺"
     echo ""
     print_menu_item "0" "退出" "🚪"
     echo ""
@@ -9944,12 +10122,18 @@ main() {
             echo -e "${CYAN}非官方消息渠道配置流程结束。${NC}"
             exit 0
             ;;
+        --repair-config)
+            repair_runtime_config_preserve_data
+            echo ""
+            echo -e "${CYAN}配置修复流程结束。${NC}"
+            exit 0
+            ;;
     esac
     
     # 主循环
     while true; do
         show_main_menu
-        echo -en "${YELLOW}请选择 [0-11]: ${NC}"
+        echo -en "${YELLOW}请选择 [0-12]: ${NC}"
         if ! read choice < "$TTY_INPUT"; then
             echo ""
             log_error "无法读取输入（TTY 不可用），退出配置菜单。"
@@ -9968,6 +10152,7 @@ main() {
             9) view_config ;;
             10) config_identity ;;
             11) manage_service ;;
+            12) repair_runtime_config_preserve_data ;;
             0)
                 echo ""
                 echo -e "${CYAN}再见！🦞${NC}"
