@@ -4496,47 +4496,23 @@ config_channels_unofficial() {
     clear_screen
     print_header
 
-    echo -e "${WHITE}📱 非官方消息渠道配置${NC}"
+    echo -e "${WHITE}📱 非官方消息渠道配置（已停用）${NC}"
     print_divider
     echo ""
-    echo -e "${YELLOW}说明: 以下菜单以社区渠道为主，企业微信固定使用官方插件。${NC}"
-    echo -e "${YELLOW}说明: 默认消息插件不再自动安装，请按需在“官方消息插件管理”中手动安装。${NC}"
+    echo -e "${YELLOW}说明: 社区消息渠道已从一键安装与主菜单移除。${NC}"
+    echo -e "${YELLOW}说明: 请由用户自行安装对应插件，再按上游文档手动完成配对。${NC}"
     echo -e "${GRAY}详细文档: ~/.openclaw/docs/channels-configuration-guide.md${NC}"
     echo ""
-
-    print_menu_item "1" "微信（LangBot WeChatPad，社区）" "🟢"
-    print_menu_item "2" "QQ（社区插件）" "🐧"
-    print_menu_item "3" "企业微信（WeCom，官方）" "🏬"
-    print_menu_item "4" "钉钉（DingTalk，社区插件）" "📲"
-    print_menu_item "5" "钉钉/QQ/企业微信 官方状态检查" "🧾"
-    print_menu_item "6" "iMessage（旧版）" "🍎"
-    print_menu_item "7" "非官方渠道兜底模型（硅基流动）" "🛟"
-    print_menu_item "8" "非官方渠道高级模型（Claude/GPT）" "🚀"
-    print_menu_item "9" "模型自动切换路由" "🧭"
-    print_menu_item "0" "返回主菜单" "↩️"
-    echo ""
-
-    echo -en "${YELLOW}请选择 [0-9]: ${NC}"
-    read choice < "$TTY_INPUT"
-
-    case $choice in
-        1) config_wechat ;;
-        2) config_qq_community ;;
-        3) config_wecom_community ;;
-        4) config_dingtalk_community ;;
-        5) check_cn_enterprise_channel_official_status ;;
-        6) config_imessage ;;
-        7) config_unofficial_fallback_model ;;
-        8) config_unofficial_advanced_model ;;
-        9) config_unofficial_model_routing ;;
-        0) return ;;
-        *) log_error "无效选择"; press_enter; config_channels_unofficial ;;
-    esac
+    echo -e "${CYAN}当前建议:${NC}"
+    echo -e "  1. 在 ${WHITE}官方消息渠道插件（官方）${NC} 中管理官方渠道"
+    echo -e "  2. 社区渠道按需手动安装，不再由本脚本托管"
+    echo -e "  3. 若历史配置有残留，执行 ${WHITE}配置修复 / 迁移（保留记忆）${NC}"
+    press_enter
 }
 
-# 兼容旧入口：默认跳转到非官方消息渠道配置
+# 兼容旧入口：改为跳转官方消息渠道配置
 config_channels() {
-    config_channels_unofficial
+    config_channels_official
 }
 
 config_telegram() {
@@ -7129,7 +7105,7 @@ ${greeting}
 
 ## 渠道配置入口
 - 命令: \`bash ~/.openclaw/config-menu.sh\`
-- 主菜单: 3 官方消息渠道插件 / 4 非官方消息渠道配置
+- 主菜单: 3 官方消息渠道插件
 - 文档:
   - ${WELCOME_DOC_URL_GITEE}
   - ${WELCOME_DOC_URL_GITHUB}
@@ -10195,15 +10171,14 @@ show_main_menu() {
     print_menu_item "1" "系统状态" "📊"
     print_menu_item "2" "AI 模型配置（官方）" "🤖"
     print_menu_item "3" "官方消息渠道插件（官方）" "📡"
-    print_menu_item "4" "非官方消息渠道配置（社区）" "📱"
-    print_menu_item "5" "安全设置" "🔒"
-    print_menu_item "6" "Skills 管理（官方/增强/超级）" "🧩"
-    print_menu_item "7" "快速测试" "🧪"
-    print_menu_item "8" "高级设置" "🔧"
-    print_menu_item "9" "查看当前配置" "📋"
-    print_menu_item "10" "身份与个性配置" "👤"
-    print_menu_item "11" "服务管理" "⚡"
-    print_menu_item "12" "配置修复 / 迁移（保留记忆）" "🩺"
+    print_menu_item "4" "安全设置" "🔒"
+    print_menu_item "5" "Skills 管理（官方/增强/超级）" "🧩"
+    print_menu_item "6" "快速测试" "🧪"
+    print_menu_item "7" "高级设置" "🔧"
+    print_menu_item "8" "查看当前配置" "📋"
+    print_menu_item "9" "身份与个性配置" "👤"
+    print_menu_item "10" "服务管理" "⚡"
+    print_menu_item "11" "配置修复 / 迁移（保留记忆）" "🩺"
     echo ""
     print_menu_item "0" "退出" "🚪"
     echo ""
@@ -10236,15 +10211,17 @@ main() {
             exit 0
             ;;
         --community-channels-only)
-            config_channels_unofficial
+            echo -e "${YELLOW}提示:${NC} 社区消息渠道入口已停用，改为打开官方消息渠道配置。"
+            config_channels_official
             echo ""
-            echo -e "${CYAN}非官方消息渠道配置流程结束。${NC}"
+            echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
             exit 0
             ;;
         --channels-only)
-            config_channels_unofficial
+            echo -e "${YELLOW}提示:${NC} 默认渠道入口已收敛为官方消息渠道配置。"
+            config_channels_official
             echo ""
-            echo -e "${CYAN}非官方消息渠道配置流程结束。${NC}"
+            echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
             exit 0
             ;;
         --repair-config)
@@ -10258,7 +10235,7 @@ main() {
     # 主循环
     while true; do
         show_main_menu
-        echo -en "${YELLOW}请选择 [0-12]: ${NC}"
+        echo -en "${YELLOW}请选择 [0-11]: ${NC}"
         if ! read choice < "$TTY_INPUT"; then
             echo ""
             log_error "无法读取输入（TTY 不可用），退出配置菜单。"
@@ -10269,15 +10246,14 @@ main() {
             1) show_status ;;
             2) config_ai_model ;;
             3) config_channels_official ;;
-            4) config_channels_unofficial ;;
-            5) config_security ;;
-            6) manage_skills ;;
-            7) quick_test_menu ;;
-            8) advanced_settings ;;
-            9) view_config ;;
-            10) config_identity ;;
-            11) manage_service ;;
-            12) repair_runtime_config_preserve_data ;;
+            4) config_security ;;
+            5) manage_skills ;;
+            6) quick_test_menu ;;
+            7) advanced_settings ;;
+            8) view_config ;;
+            9) config_identity ;;
+            10) manage_service ;;
+            11) repair_runtime_config_preserve_data ;;
             0)
                 echo ""
                 echo -e "${CYAN}再见！🦞${NC}"
