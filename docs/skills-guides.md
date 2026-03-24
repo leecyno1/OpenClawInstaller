@@ -11,6 +11,7 @@
 | agentmail-toolkit | 基础档默认安装 | 是 | `skills/default/agentmail-toolkit/GUIDE.md` |
 | akshare-stock | 基础档默认安装 | 是 | `skills/default/akshare-stock/GUIDE.md` |
 | ai-image-generation | 基础档默认安装 | 视图像服务而定 | `skills/default/ai-image-generation/GUIDE.md` |
+| baoyu-skills | 仅全量默认包/手动同步 | 否 | `skills/default/baoyu-skills/GUIDE.md` |
 | blogwatcher | 仅全量默认包/手动同步 | 是 | `skills/default/blogwatcher/GUIDE.md` |
 | brainstorming | 基础档默认安装 | 否 | `skills/default/brainstorming/GUIDE.md` |
 | capability-evolver | 基础档默认安装 | 是 | `skills/default/capability-evolver/GUIDE.md` |
@@ -32,6 +33,7 @@
 | nano-banana-service | 扩展档默认安装 | 是 | `skills/default/nano-banana-service/GUIDE.md` |
 | nano-pdf | 仅全量默认包/手动同步 | 是 | `skills/default/nano-pdf/GUIDE.md` |
 | news-radar | 基础档默认安装 | 是 | `skills/default/news-radar/GUIDE.md` |
+| notebooklm-skill | 仅全量默认包/手动同步 | 是 | `skills/default/notebooklm-skill/GUIDE.md` |
 | openclaw-cron-setup | 基础档默认安装 | 否 | `skills/default/openclaw-cron-setup/GUIDE.md` |
 | pdf | 基础档默认安装 | 是 | `skills/default/pdf/GUIDE.md` |
 | pptx | 基础档默认安装 | 是 | `skills/default/pptx/GUIDE.md` |

@@ -151,6 +151,7 @@ RULE_PROFILE_DEFAULT="${OPENCLAW_RULE_PROFILE:-medium}"
 PROFILE_BASIC_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock content-strategy social-content ai-image-generation marketingskills inference-skills agentmail agentmail-cli agentmail-mcp agentmail-toolkit"
 PROFILE_EXTENDED_SKILLS="capability-evolver openclaw-cron-setup proactive-agent self-improving-agent-cn brainstorming reflection find-skills skill-creator agent-browser chrome-devtools-mcp github mcp-builder model-usage shell minimax-understand-image tavily-search web-search minimax-web-search news-radar url-to-markdown pdf docx pptx xlsx stock-monitor-skill multi-search-engine akshare-stock content-strategy social-content ai-image-generation marketingskills inference-skills gemini-image-service nano-banana-service agentmail agentmail-cli agentmail-mcp agentmail-toolkit"
 PROFILE_SUPER_SKILLS="__ALL_DEFAULT__"
+SUPER_CURATED_SKILLS_LIST="notebooklm-skill baoyu-skills baoyu-article-illustrator baoyu-comic baoyu-compress-image baoyu-cover-image baoyu-danger-gemini-web baoyu-danger-x-to-markdown baoyu-format-markdown baoyu-image-gen baoyu-infographic baoyu-markdown-to-html baoyu-post-to-wechat baoyu-post-to-weibo baoyu-post-to-x baoyu-slide-deck baoyu-translate baoyu-url-to-markdown baoyu-xhs-images baoyu-youtube-transcript"
 RULE_PROFILE_MENU_SELECTED=""
 GEMINI_BASE_URL_DEFAULT="${GEMINI_BASE_URL:-${GOOGLE_BASE_URL:-}}"
 GEMINI_IMAGE_MODEL_DEFAULT="${GEMINI_IMAGE_MODEL:-gemini-2.5-flash-image-preview}"
@@ -172,6 +173,10 @@ SKILL_PIP_PACKAGES_FILE_REL="skills/requirements-runtime.txt"
 WELCOME_DOC_URL_GITEE="https://gitee.com/leecyno1/auto-install-openclaw/blob/main/docs/channels-configuration-guide.md"
 WELCOME_DOC_URL_GITHUB="https://github.com/leecyno1/auto-install-Openclaw/blob/main/docs/channels-configuration-guide.md"
 PERSONA_ROLE_MENU_SELECTED="$(echo "${OPENCLAW_PERSONA_ROLE:-druid}" | tr '[:upper:]' '[:lower:]')"
+GAME_PROFILE_DIR="$CONFIG_DIR/profile"
+GAME_PROFILE_JSON="$GAME_PROFILE_DIR/game-profile.json"
+GAME_PROGRESS_JSON="$GAME_PROFILE_DIR/game-progress.json"
+GAME_ACHIEVEMENTS_JSON="$GAME_PROFILE_DIR/game-achievements.json"
 
 # ================================ 工具函数 ================================
 
@@ -188,7 +193,7 @@ print_header() {
     cat << 'EOF'
     ╔═══════════════════════════════════════════════════════════════╗
     ║                                                               ║
-    ║   🦞 OpenClaw 配置中心                                         ║
+    ║   🦞 OpenClaw 配置圣殿                                         ║
     ║                                                               ║
     ╚═══════════════════════════════════════════════════════════════╝
 EOF
@@ -1038,6 +1043,625 @@ EOF
 EOF
             ;;
     esac
+}
+
+sanitize_config_value_menu() {
+    local value
+    value="$(echo "${1:-}" | tr -d '\r')"
+    case "$value" in
+        ""|"null"|"undefined"|"None") echo "" ;;
+        *) echo "$value" ;;
+    esac
+}
+
+config_get_value_menu() {
+    local key="$1"
+    local value=""
+    if check_openclaw_installed; then
+        value="$(openclaw config get "$key" 2>/dev/null || true)"
+    fi
+    sanitize_config_value_menu "$value"
+}
+
+get_current_rule_profile_menu() {
+    local profile
+    profile="$(config_get_value_menu "vendor.control.profile")"
+    [ -z "$profile" ] && profile="${OPENCLAW_RULE_PROFILE:-$RULE_PROFILE_DEFAULT}"
+    normalize_rule_profile_level "$profile"
+}
+
+refresh_game_progress_profile_menu() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "未检测到 python3，无法计算角色成长统计"
+        return 1
+    fi
+
+    mkdir -p "$GAME_PROFILE_DIR" 2>/dev/null || true
+
+    local role_id role_name role_emoji hero_name hero_goal
+    local main_model fallback_model
+    local memory_boot memory_session sandbox_mode
+    local tasks_completed tasks_success tokens_used
+    local installed_skills_count
+    local rule_profile limits window_hours max_requests max_tokens max_tokens_per_req
+
+    role_id="$(config_get_value_menu "identity.role.id")"
+    [ -z "$role_id" ] && role_id="${OPENCLAW_PERSONA_ROLE:-druid}"
+    set_persona_role_profile_menu "$role_id"
+    role_id="$PERSONA_ROLE_MENU_SELECTED"
+    role_name="$PERSONA_ROLE_NAME_MENU"
+    role_emoji="$PERSONA_ROLE_EMOJI_MENU"
+
+    hero_name="$(config_get_value_menu "identity.name")"
+    [ -z "$hero_name" ] && hero_name="${OPENCLAW_ASSISTANT_NAME:-龙虾小助理}"
+    hero_goal="$(config_get_value_menu "identity.goal")"
+    [ -z "$hero_goal" ] && hero_goal="${OPENCLAW_USER_GOAL:-综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等}"
+
+    main_model="$(get_current_model_ref || true)"
+    [ -z "$main_model" ] && main_model="未配置"
+    fallback_model="$(config_get_value_menu "channels.unofficial.fallback.model")"
+    [ -z "$fallback_model" ] && fallback_model="${OPENCLAW_UNOFFICIAL_OPENAI_MODEL:-Qwen/Qwen3-8B}"
+
+    memory_boot="$(config_get_value_menu "boot-md.enabled")"
+    [ -z "$memory_boot" ] && memory_boot="$(config_get_value_menu "memory.boot.enabled")"
+    [ -z "$memory_boot" ] && memory_boot="true"
+    memory_session="$(config_get_value_menu "session-memory.enabled")"
+    [ -z "$memory_session" ] && memory_session="$(config_get_value_menu "memory.session.enabled")"
+    [ -z "$memory_session" ] && memory_session="true"
+    sandbox_mode="$(config_get_value_menu "security.sandbox_mode")"
+    [ -z "$sandbox_mode" ] && sandbox_mode="false"
+
+    tasks_completed="${OPENCLAW_GAME_TASKS_COMPLETED:-}"
+    tasks_success="${OPENCLAW_GAME_TASKS_SUCCESS:-}"
+    tokens_used="${OPENCLAW_GAME_TOKENS_USED:-${OPENCLAW_GAME_TOKENS:-}}"
+
+    installed_skills_count=0
+    if [ -d "$CONFIG_DIR/skills" ]; then
+        installed_skills_count="$(find "$CONFIG_DIR/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    fi
+
+    rule_profile="$(get_current_rule_profile_menu)"
+    limits="$(get_profile_token_limits "$rule_profile")"
+    window_hours="$(echo "$limits" | awk '{print $1}')"
+    max_requests="$(echo "$limits" | awk '{print $2}')"
+    max_tokens="$(echo "$limits" | awk '{print $3}')"
+    max_tokens_per_req="$(echo "$limits" | awk '{print $4}')"
+
+    role_id="$role_id" \
+    role_name="$role_name" \
+    role_emoji="$role_emoji" \
+    hero_name="$hero_name" \
+    hero_goal="$hero_goal" \
+    main_model="$main_model" \
+    fallback_model="$fallback_model" \
+    memory_boot="$memory_boot" \
+    memory_session="$memory_session" \
+    sandbox_mode="$sandbox_mode" \
+    tasks_completed="$tasks_completed" \
+    tasks_success="$tasks_success" \
+    tokens_used="$tokens_used" \
+    installed_skills_count="$installed_skills_count" \
+    rule_profile="$rule_profile" \
+    window_hours="$window_hours" \
+    max_requests="$max_requests" \
+    max_tokens="$max_tokens" \
+    max_tokens_per_req="$max_tokens_per_req" \
+    python3 - "$GAME_PROFILE_JSON" "$GAME_PROGRESS_JSON" "$GAME_ACHIEVEMENTS_JSON" <<'PYEOF'
+import json
+import math
+import os
+import sys
+import time
+from datetime import datetime, timezone
+
+profile_path = os.path.expanduser(sys.argv[1])
+progress_path = os.path.expanduser(sys.argv[2])
+achv_path = os.path.expanduser(sys.argv[3])
+
+role_id = os.environ.get("role_id", "druid")
+role_name = os.environ.get("role_name", "万金油·德鲁伊")
+role_emoji = os.environ.get("role_emoji", "🦞")
+hero_name = os.environ.get("hero_name", "龙虾小助理")
+hero_goal = os.environ.get("hero_goal", "综合的小助理，帮我制定日程，邮件，写作，搜索，投资分析等")
+main_model = os.environ.get("main_model", "未配置")
+fallback_model = os.environ.get("fallback_model", "Qwen/Qwen3-8B")
+memory_boot = os.environ.get("memory_boot", "true")
+memory_session = os.environ.get("memory_session", "true")
+sandbox_mode = os.environ.get("sandbox_mode", "false")
+tasks_completed_in = os.environ.get("tasks_completed", "0")
+tasks_success_in = os.environ.get("tasks_success", "0")
+tokens_used_in = os.environ.get("tokens_used", "0")
+installed_skills_count = os.environ.get("installed_skills_count", "0")
+rule_profile = os.environ.get("rule_profile", "medium")
+window_hours = os.environ.get("window_hours", "5")
+max_requests = os.environ.get("max_requests", "160")
+max_tokens = os.environ.get("max_tokens", "2400000")
+max_tokens_per_req = os.environ.get("max_tokens_per_req", "48000")
+
+def to_int(value, default=0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return int(value)
+        return int(float(str(value).strip()))
+    except Exception:
+        return default
+
+def to_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(str(value).strip())
+    except Exception:
+        return default
+
+def to_bool(value, default=False):
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "y", "on"}:
+        return True
+    if raw in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+def read_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return default
+
+now_epoch = int(time.time())
+now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+profile = read_json(profile_path, {})
+progress = read_json(progress_path, {})
+achievements = read_json(achv_path, {})
+
+first_seen_epoch = to_int(progress.get("firstSeenEpoch"), 0)
+if first_seen_epoch <= 0:
+    first_seen_epoch = to_int(profile.get("firstSeenEpoch"), 0)
+if first_seen_epoch <= 0 or first_seen_epoch > now_epoch:
+    first_seen_epoch = now_epoch
+
+hours_played = round(max(0, now_epoch - first_seen_epoch) / 3600.0, 2)
+tokens_used = max(0, to_int(tokens_used_in, to_int(progress.get("stats", {}).get("tokensUsed"), 0)))
+tasks_completed = max(0, to_int(tasks_completed_in, to_int(progress.get("stats", {}).get("tasksCompleted"), 0)))
+tasks_success = max(0, to_int(tasks_success_in, to_int(progress.get("stats", {}).get("tasksSuccess"), 0)))
+if tasks_success > tasks_completed:
+    tasks_success = tasks_completed
+success_rate = round((tasks_success / tasks_completed), 4) if tasks_completed > 0 else 0.0
+
+if success_rate >= 0.90:
+    success_bonus = 120
+elif success_rate >= 0.75:
+    success_bonus = 60
+else:
+    success_bonus = 0
+
+xp = int(
+    hours_played * 8
+    + math.log2(tokens_used / 1000 + 1) * 35
+    + tasks_completed * 10
+    + tasks_success * 22
+    + success_bonus
+)
+
+def xp_required(level: int) -> int:
+    if level <= 0:
+        return 0
+    return int(round(120 * (level ** 1.45)))
+
+level = 1
+while level < 99 and xp >= xp_required(level + 1):
+    level += 1
+current_floor = xp_required(level)
+next_target = xp_required(level + 1)
+segment = max(1, next_target - current_floor)
+progress_ratio = max(0.0, min(1.0, (xp - current_floor) / segment))
+progress_percent = int(round(progress_ratio * 100))
+
+if level >= 15:
+    tier = "super"
+elif level >= 8:
+    tier = "extended"
+else:
+    tier = "basic"
+
+profile_data = {
+    "version": "v1",
+    "firstSeenEpoch": first_seen_epoch,
+    "updatedAt": now_iso,
+    "hero": {
+        "classId": role_id,
+        "className": role_name,
+        "emoji": role_emoji,
+        "name": hero_name,
+        "goal": hero_goal,
+    },
+}
+
+progress_data = {
+    "version": "v1",
+    "firstSeenEpoch": first_seen_epoch,
+    "updatedAt": now_iso,
+    "hero": {
+        "classId": role_id,
+        "className": role_name,
+        "emoji": role_emoji,
+        "name": hero_name,
+        "level": level,
+        "xp": xp,
+        "xpCurrentFloor": current_floor,
+        "xpNextTarget": next_target,
+        "xpProgressPercent": progress_percent,
+    },
+    "stats": {
+        "hoursPlayed": hours_played,
+        "tokensUsed": tokens_used,
+        "tasksCompleted": tasks_completed,
+        "tasksSuccess": tasks_success,
+        "successRate": success_rate,
+        "installedSkillsCount": to_int(installed_skills_count, 0),
+    },
+    "skillTree": {
+        "recommendedTier": tier,
+    },
+    "gear": {
+        "mainModel": main_model,
+        "fallbackModel": fallback_model,
+        "memory": {
+            "bootMd": to_bool(memory_boot, True),
+            "sessionMemory": to_bool(memory_session, True),
+        },
+        "security": {
+            "sandboxMode": to_bool(sandbox_mode, False),
+        },
+        "policy": {
+            "ruleProfile": rule_profile,
+            "windowHours": to_int(window_hours, 5),
+            "maxRequests": to_int(max_requests, 160),
+            "maxTokens": to_int(max_tokens, 2400000),
+            "maxTokensPerRequest": to_int(max_tokens_per_req, 48000),
+        },
+    },
+}
+
+achievements.setdefault("version", "v1")
+achievements["updatedAt"] = now_iso
+achievements.setdefault("items", [])
+
+os.makedirs(os.path.dirname(profile_path), exist_ok=True)
+for path, payload in (
+    (profile_path, profile_data),
+    (progress_path, progress_data),
+    (achv_path, achievements),
+):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+PYEOF
+}
+
+print_game_panel_menu() {
+    if [ ! -f "$GAME_PROGRESS_JSON" ]; then
+        refresh_game_progress_profile_menu >/dev/null 2>&1 || true
+    fi
+
+    python3 - "$GAME_PROGRESS_JSON" <<'PYEOF'
+import json
+import os
+import sys
+
+path = os.path.expanduser(sys.argv[1])
+if not os.path.exists(path):
+    print("  角色面板尚未生成，请先执行一次成长统计刷新。")
+    raise SystemExit(0)
+
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+hero = data.get("hero", {})
+stats = data.get("stats", {})
+skill_tree = data.get("skillTree", {})
+gear = data.get("gear", {})
+memory = (gear.get("memory") or {})
+security = (gear.get("security") or {})
+policy = (gear.get("policy") or {})
+
+name = hero.get("name", "龙虾小助理")
+emoji = hero.get("emoji", "🦞")
+clazz = hero.get("className", "万金油·德鲁伊")
+level = hero.get("level", 1)
+xp = hero.get("xp", 0)
+xp_next = hero.get("xpNextTarget", 0)
+xp_pct = hero.get("xpProgressPercent", 0)
+hours = stats.get("hoursPlayed", 0)
+tokens = stats.get("tokensUsed", 0)
+completed = stats.get("tasksCompleted", 0)
+success = stats.get("tasksSuccess", 0)
+rate = float(stats.get("successRate", 0) or 0)
+skills_count = stats.get("installedSkillsCount", 0)
+tier = skill_tree.get("recommendedTier", "basic")
+main_model = gear.get("mainModel", "未配置")
+fallback_model = gear.get("fallbackModel", "未配置")
+boot_md = "开启" if bool(memory.get("bootMd", False)) else "关闭"
+session_memory = "开启" if bool(memory.get("sessionMemory", False)) else "关闭"
+sandbox = "开启" if bool(security.get("sandboxMode", False)) else "关闭"
+rule_profile = policy.get("ruleProfile", "medium")
+window = policy.get("windowHours", 5)
+max_req = policy.get("maxRequests", 160)
+max_tok = policy.get("maxTokens", 2400000)
+
+bar_total = 24
+filled = int(round(max(0, min(100, xp_pct)) / 100 * bar_total))
+bar = "█" * filled + "░" * (bar_total - filled)
+
+tier_label = {
+    "basic": "基础技能树",
+    "extended": "进阶技能树",
+    "super": "终极技能树",
+}.get(str(tier), str(tier))
+
+print(f"  {emoji} 角色: {name} · {clazz}")
+print(f"  ⭐ 等级: Lv.{level}   XP: {xp}/{xp_next}   进度: [{bar}] {xp_pct}%")
+print(f"  ⏱ 使用时长: {hours} 小时")
+print(f"  🔢 Token消耗: {tokens}")
+print(f"  ✅ 任务完成: {completed}   成功: {success}   成功率: {rate*100:.1f}%")
+print(f"  🌲 技能树: {tier_label}   已安装技能: {skills_count}")
+print(f"  ⚔️ 主武器(主模型): {main_model}")
+print(f"  🛡️ 副武器(兜底模型): {fallback_model}")
+print(f"  🧠 头盔(记忆): boot-md {boot_md} / session-memory {session_memory}")
+print(f"  🧱 护甲(安全): sandbox {sandbox}")
+print(f"  📜 圣殿法则: {rule_profile} 档（{window}小时/{max_req}次, token上限 {max_tok}）")
+PYEOF
+}
+
+count_words_menu() {
+    local words
+    words="$(echo "${1:-}" | xargs)"
+    [ -z "$words" ] && echo "0" && return 0
+    echo "$words" | wc -w | tr -d ' '
+}
+
+count_installed_skills_from_list_menu() {
+    local skill_names="$1"
+    local skills_dir="$CONFIG_DIR/skills"
+    local count=0
+    local name
+    for name in $skill_names; do
+        [ -d "$skills_dir/$name" ] && count=$((count + 1))
+    done
+    echo "$count"
+}
+
+preview_missing_skills_from_list_menu() {
+    local skill_names="$1"
+    local limit="${2:-8}"
+    local skills_dir="$CONFIG_DIR/skills"
+    local out=""
+    local count=0
+    local name
+    for name in $skill_names; do
+        [ -d "$skills_dir/$name" ] && continue
+        if [ -n "$out" ]; then
+            out="$out, $name"
+        else
+            out="$name"
+        fi
+        count=$((count + 1))
+        [ "$count" -ge "$limit" ] && break
+    done
+    echo "$out"
+}
+
+infer_recommended_skill_tier_menu() {
+    local tier=""
+    if [ -f "$GAME_PROGRESS_JSON" ] && command -v python3 >/dev/null 2>&1; then
+        tier="$(python3 - "$GAME_PROGRESS_JSON" <<'PYEOF'
+import json, os, sys
+path = os.path.expanduser(sys.argv[1])
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    tier = ((data.get("skillTree") or {}).get("recommendedTier") or "").strip()
+    if tier in {"basic", "extended", "super"}:
+        print(tier)
+except Exception:
+    pass
+PYEOF
+)"
+        tier="$(sanitize_config_value_menu "$tier")"
+    fi
+
+    if [ -n "$tier" ]; then
+        echo "$tier"
+        return 0
+    fi
+
+    case "$(get_current_rule_profile_menu)" in
+        low) echo "basic" ;;
+        medium) echo "extended" ;;
+        high) echo "super" ;;
+        *) echo "basic" ;;
+    esac
+}
+
+show_skill_tree_status_menu() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🌲 技能树总览${NC}"
+    print_divider
+    echo ""
+
+    local basic_total basic_installed ext_total ext_installed super_total super_installed
+    local recommended tier_label missing_preview bundle_dir
+    basic_total="$(count_words_menu "$PROFILE_BASIC_SKILLS")"
+    basic_installed="$(count_installed_skills_from_list_menu "$PROFILE_BASIC_SKILLS")"
+    ext_total="$(count_words_menu "$PROFILE_EXTENDED_SKILLS")"
+    ext_installed="$(count_installed_skills_from_list_menu "$PROFILE_EXTENDED_SKILLS")"
+
+    bundle_dir="$(resolve_default_skills_bundle_dir 2>/dev/null || true)"
+    if [ -n "$bundle_dir" ] && [ -d "$bundle_dir" ]; then
+        super_total="$(find "$bundle_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    else
+        super_total=0
+    fi
+    if [ -d "$CONFIG_DIR/skills" ]; then
+        super_installed="$(find "$CONFIG_DIR/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    else
+        super_installed=0
+    fi
+
+    recommended="$(infer_recommended_skill_tier_menu)"
+    case "$recommended" in
+        basic) tier_label="基础技能树（Level 1+）" ;;
+        extended) tier_label="进阶技能树（Level 8+）" ;;
+        super) tier_label="终极技能树（Level 15+）" ;;
+        *) tier_label="基础技能树（Level 1+）" ;;
+    esac
+
+    missing_preview="$(preview_missing_skills_from_list_menu "$PROFILE_EXTENDED_SKILLS" 10)"
+
+    echo -e "  ${CYAN}推荐树层:${NC} ${WHITE}${tier_label}${NC}"
+    echo ""
+    echo -e "  ${WHITE}基础树${NC}   已装 ${GREEN}${basic_installed}${NC} / 总计 ${basic_total}"
+    echo -e "  ${WHITE}进阶树${NC}   已装 ${GREEN}${ext_installed}${NC} / 总计 ${ext_total}"
+    echo -e "  ${WHITE}终极树${NC}   已装 ${GREEN}${super_installed}${NC} / 总计 ${super_total}"
+    echo ""
+    if [ -n "$missing_preview" ]; then
+        echo -e "  ${YELLOW}当前缺失（节选）:${NC} ${missing_preview}"
+    else
+        echo -e "  ${GREEN}当前推荐树层技能已齐备。${NC}"
+    fi
+    echo ""
+    echo -e "  ${CYAN}提示:${NC} 在“技能树祭坛”可执行补齐/强制覆盖更新。"
+}
+
+print_equipment_slots_menu() {
+    local main_model fallback_model
+    local gemini_url gemini_model nano_url nano_img_model nano_video_model
+    local boot_md session_memory sandbox_mode rule_profile
+
+    main_model="$(get_current_model_ref || true)"
+    [ -z "$main_model" ] && main_model="未配置"
+    fallback_model="$(config_get_value_menu "channels.unofficial.fallback.model")"
+    [ -z "$fallback_model" ] && fallback_model="${OPENCLAW_UNOFFICIAL_OPENAI_MODEL:-Qwen/Qwen3-8B}"
+
+    gemini_url="$(sanitize_config_value_menu "${GEMINI_BASE_URL:-$GEMINI_BASE_URL_DEFAULT}")"
+    gemini_model="$(sanitize_config_value_menu "${GEMINI_IMAGE_MODEL:-$GEMINI_IMAGE_MODEL_DEFAULT}")"
+    nano_url="$(sanitize_config_value_menu "${NANO_BANANA_BASE_URL:-$NANO_BANANA_BASE_URL_DEFAULT}")"
+    nano_img_model="$(sanitize_config_value_menu "${NANO_BANANA_IMAGE_MODEL:-$NANO_BANANA_IMAGE_MODEL_DEFAULT}")"
+    nano_video_model="$(sanitize_config_value_menu "${NANO_BANANA_VIDEO_MODEL:-$NANO_BANANA_VIDEO_MODEL_DEFAULT}")"
+
+    boot_md="$(config_get_value_menu "boot-md.enabled")"
+    [ -z "$boot_md" ] && boot_md="$(config_get_value_menu "memory.boot.enabled")"
+    [ -z "$boot_md" ] && boot_md="true"
+    session_memory="$(config_get_value_menu "session-memory.enabled")"
+    [ -z "$session_memory" ] && session_memory="$(config_get_value_menu "memory.session.enabled")"
+    [ -z "$session_memory" ] && session_memory="true"
+    sandbox_mode="$(config_get_value_menu "security.sandbox_mode")"
+    [ -z "$sandbox_mode" ] && sandbox_mode="false"
+    rule_profile="$(get_current_rule_profile_menu)"
+
+    echo -e "  ⚔️ 主武器（主模型）: ${WHITE}${main_model}${NC}"
+    echo -e "  🛡️ 副武器（兜底模型）: ${WHITE}${fallback_model}${NC}"
+    echo -e "  🧠 头盔（记忆）: ${WHITE}boot-md=${boot_md} | session-memory=${session_memory}${NC}"
+    echo -e "  🧱 护甲（安全）: ${WHITE}sandbox=${sandbox_mode}${NC}"
+    echo -e "  💍 戒指Ⅰ（Gemini 图像）: ${WHITE}${gemini_url:-未配置} | ${gemini_model:-未配置}${NC}"
+    echo -e "  💍 戒指Ⅱ（NanoBanana）: ${WHITE}${nano_url:-未配置} | ${nano_img_model:-未配置} | ${nano_video_model:-未配置}${NC}"
+    echo -e "  📜 法则卷轴（token档位）: ${WHITE}${rule_profile}${NC}"
+}
+
+show_achievements_bounties_menu() {
+    clear_screen
+    print_header
+    echo -e "${WHITE}🏆 成就与悬赏（占位）${NC}"
+    print_divider
+    echo ""
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "未检测到 python3，无法生成成就/悬赏视图"
+        return 1
+    fi
+
+    refresh_game_progress_profile_menu >/dev/null 2>&1 || true
+
+    python3 - "$GAME_PROGRESS_JSON" "$GAME_ACHIEVEMENTS_JSON" <<'PYEOF'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+progress_path = os.path.expanduser(sys.argv[1])
+achv_path = os.path.expanduser(sys.argv[2])
+
+progress = {}
+if os.path.exists(progress_path):
+    try:
+        with open(progress_path, "r", encoding="utf-8") as f:
+            progress = json.load(f)
+    except Exception:
+        progress = {}
+
+hero = progress.get("hero") or {}
+stats = progress.get("stats") or {}
+name = hero.get("name", "龙虾小助理")
+clazz = hero.get("className", "万金油·德鲁伊")
+level = int(hero.get("level", 1) or 1)
+completed = int(stats.get("tasksCompleted", 0) or 0)
+success = int(stats.get("tasksSuccess", 0) or 0)
+rate = float(stats.get("successRate", 0) or 0)
+tokens = int(stats.get("tokensUsed", 0) or 0)
+
+achievements = [
+    ("初出茅庐", completed >= 1, f"完成任务 1/1（当前 {completed}）"),
+    ("百战老兵", completed >= 50, f"完成任务 {min(completed,50)}/50"),
+    ("稳健执行官", completed >= 20 and rate >= 0.85, f"成功率 {rate*100:.1f}%（目标 >=85%）"),
+    ("节流大师", completed >= 30 and tokens <= 3000000, f"Token={tokens}（参考 <=3000000）"),
+]
+
+bounties = [
+    ("每日悬赏：连胜三场", f"今日成功任务达到 3 个（当前成功总数 {success}）"),
+    ("周常悬赏：技能树修缮", "补齐至少 5 个缺失技能并完成一次试炼场验证"),
+    ("周常悬赏：圣殿巡检", "执行一次 Doctor 修复 + 一次 Gateway 健康检查"),
+]
+
+print(f"  英雄: {name} · {clazz} · Lv.{level}")
+print("")
+print("  成就墙：")
+for title, done, desc in achievements:
+    mark = "✅" if done else "⬜"
+    print(f"    {mark} {title} - {desc}")
+
+print("")
+print("  悬赏板（V1 占位任务）：")
+for idx, (title, desc) in enumerate(bounties, 1):
+    print(f"    {idx}. {title}")
+    print(f"       {desc}")
+
+payload = {
+    "version": "v1",
+    "updatedAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "items": [
+        {"id": t, "done": bool(d), "detail": s} for t, d, s in achievements
+    ],
+    "bounties": [
+        {"title": t, "detail": s} for t, s in bounties
+    ],
+}
+os.makedirs(os.path.dirname(achv_path), exist_ok=True)
+with open(achv_path, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PYEOF
 }
 
 prompt_profile_api_key_menu() {
@@ -2502,86 +3126,149 @@ run_official_model_onboard() {
 # ================================ 状态显示 ================================
 
 show_status() {
-    clear_screen
-    print_header
-    
-    echo -e "${WHITE}📊 系统状态${NC}"
-    print_divider
-    echo ""
-    
-    # OpenClaw 服务状态
-    if check_openclaw_installed; then
-        echo -e "  ${GREEN}✓${NC} OpenClaw 已安装: $(openclaw --version 2>/dev/null || echo 'unknown')"
-        
-        # 使用端口检测判断服务运行状态（更可靠）
-        local status_pid
-        status_pid=$(get_gateway_pid)
-        if [ -n "$status_pid" ]; then
-            echo -e "  ${GREEN}●${NC} 服务状态: ${GREEN}运行中${NC} (PID: $status_pid)"
-        else
-            echo -e "  ${RED}●${NC} 服务状态: ${RED}已停止${NC}"
-        fi
-    else
-        echo -e "  ${RED}✗${NC} OpenClaw 未安装"
-    fi
-    
-    echo ""
-    
-    # 当前配置
-    if [ -f "$OPENCLAW_ENV" ]; then
+    while true; do
+        clear_screen
+        print_header
+
+        echo -e "${WHITE}🎮 角色面板（系统状态）${NC}"
+        print_divider
         echo ""
-        echo -e "  ${CYAN}当前配置:${NC}"
-        
-        # 显示 OpenClaw 模型配置
+
         if check_openclaw_installed; then
-            local default_model
-            default_model="$(get_current_model_ref || true)"
-            [ -z "$default_model" ] && default_model="未配置"
-            echo -e "    • 默认模型: ${WHITE}$default_model${NC}"
+            local status_pid gateway_bind gateway_port
+            status_pid="$(get_gateway_pid)"
+            gateway_bind="$(get_gateway_bind)"
+            gateway_port="$(get_gateway_port)"
+            echo -e "  ${GREEN}✓${NC} OpenClaw 已安装: $(openclaw --version 2>/dev/null || echo 'unknown')"
+            if [ -n "$status_pid" ]; then
+                echo -e "  ${GREEN}●${NC} Gateway: ${GREEN}运行中${NC} (PID: ${status_pid}, bind=${gateway_bind}, port=${gateway_port})"
+            else
+                echo -e "  ${RED}●${NC} Gateway: ${RED}已停止${NC} (bind=${gateway_bind}, port=${gateway_port})"
+            fi
+        else
+            echo -e "  ${RED}✗${NC} OpenClaw 未安装"
         fi
-        
-        # 检查 API Key 配置
-        if grep -q "ANTHROPIC_API_KEY" "$OPENCLAW_ENV" 2>/dev/null; then
-            echo -e "    • AI 提供商: ${WHITE}Anthropic${NC}"
-        elif grep -q "OPENAI_API_KEY" "$OPENCLAW_ENV" 2>/dev/null; then
-            echo -e "    • AI 提供商: ${WHITE}OpenAI${NC}"
-        elif grep -q "GOOGLE_API_KEY" "$OPENCLAW_ENV" 2>/dev/null; then
-            echo -e "    • AI 提供商: ${WHITE}Google${NC}"
+
+        echo ""
+        if refresh_game_progress_profile_menu >/dev/null 2>&1; then
+            print_game_panel_menu
+        else
+            echo -e "  ${YELLOW}⚠${NC} 角色成长统计暂不可用（可稍后重试）"
         fi
-    else
-        echo -e "  ${YELLOW}⚠${NC} 环境变量未配置"
-    fi
-    
-    echo ""
-    
-    # 目录状态
-    echo -e "  ${CYAN}目录结构:${NC}"
-    [ -d "$CONFIG_DIR" ] && echo -e "    ${GREEN}✓${NC} 配置目录: $CONFIG_DIR" || echo -e "    ${RED}✗${NC} 配置目录"
-    [ -f "$OPENCLAW_ENV" ] && echo -e "    ${GREEN}✓${NC} 环境变量: $OPENCLAW_ENV" || echo -e "    ${RED}✗${NC} 环境变量"
-    [ -f "$OPENCLAW_JSON" ] && echo -e "    ${GREEN}✓${NC} OpenClaw 配置: $OPENCLAW_JSON" || echo -e "    ${YELLOW}⚠${NC} OpenClaw 配置"
-    
-    echo ""
-    print_divider
-    press_enter
+
+        echo ""
+        echo -e "  ${CYAN}配置目录:${NC}"
+        [ -d "$CONFIG_DIR" ] && echo -e "    ${GREEN}✓${NC} $CONFIG_DIR" || echo -e "    ${RED}✗${NC} $CONFIG_DIR"
+        [ -f "$OPENCLAW_ENV" ] && echo -e "    ${GREEN}✓${NC} $OPENCLAW_ENV" || echo -e "    ${RED}✗${NC} $OPENCLAW_ENV"
+        [ -f "$OPENCLAW_JSON" ] && echo -e "    ${GREEN}✓${NC} $OPENCLAW_JSON" || echo -e "    ${YELLOW}⚠${NC} $OPENCLAW_JSON"
+        [ -f "$GAME_PROGRESS_JSON" ] && echo -e "    ${GREEN}✓${NC} $GAME_PROGRESS_JSON" || echo -e "    ${YELLOW}⚠${NC} $GAME_PROGRESS_JSON"
+
+        echo ""
+        print_divider
+        echo ""
+        print_menu_item "1" "刷新成长统计" "⭐"
+        print_menu_item "2" "查看 OpenClaw 状态" "📡"
+        print_menu_item "3" "查看 Gateway 健康" "💚"
+        print_menu_item "4" "运行诊断并修复" "🩺"
+        print_menu_item "5" "成就与悬赏（占位）" "🏆"
+        print_menu_item "0" "返回主菜单" "↩️"
+        echo ""
+        echo -en "${YELLOW}请选择 [0-5]: ${NC}"
+        read choice < "$TTY_INPUT"
+
+        case "$choice" in
+            1)
+                echo ""
+                if refresh_game_progress_profile_menu; then
+                    log_info "成长统计已刷新"
+                else
+                    log_error "成长统计刷新失败"
+                fi
+                press_enter
+                ;;
+            2)
+                echo ""
+                run_openclaw_status || true
+                press_enter
+                ;;
+            3)
+                echo ""
+                run_openclaw_health || true
+                press_enter
+                ;;
+            4)
+                echo ""
+                if check_openclaw_installed; then
+                    openclaw doctor --fix || true
+                else
+                    log_error "OpenClaw 未安装"
+                fi
+                press_enter
+                ;;
+            5)
+                echo ""
+                show_achievements_bounties_menu || true
+                press_enter
+                ;;
+            0)
+                return
+                ;;
+            *)
+                log_error "无效选择"
+                press_enter
+                ;;
+        esac
+    done
 }
 
 # ================================ AI 模型配置 ================================
 
 config_ai_model() {
-    clear_screen
-    print_header
-    
-    echo -e "${WHITE}🤖 AI 模型配置${NC}"
-    print_divider
-    echo ""
-    echo -e "${CYAN}本项目已切换为官方模型配置流程：openclaw onboard${NC}"
-    echo ""
-    if run_official_model_onboard; then
-        log_info "官方模型配置完成。"
-    else
-        log_error "官方模型配置失败，请先执行: openclaw doctor --fix"
-    fi
-    press_enter
+    while true; do
+        clear_screen
+        print_header
+
+        echo -e "${WHITE}⚔️ 装备工坊（AI 模型配置）${NC}"
+        print_divider
+        echo ""
+        print_equipment_slots_menu
+        echo ""
+        print_divider
+        echo ""
+        print_menu_item "1" "启动官方模型配置向导（openclaw onboard）" "🚀"
+        print_menu_item "2" "刷新装备槽位状态" "🔄"
+        print_menu_item "0" "返回主菜单" "↩️"
+        echo ""
+        read_input "${YELLOW}请选择 [0-2]: ${NC}" choice
+
+        case "$choice" in
+            1)
+                echo ""
+                echo -e "${CYAN}已切换为官方模型配置流程：openclaw onboard${NC}"
+                echo ""
+                if run_official_model_onboard; then
+                    refresh_game_progress_profile_menu >/dev/null 2>&1 || true
+                    log_info "官方模型配置完成。"
+                else
+                    log_error "官方模型配置失败，请先执行: openclaw doctor --fix"
+                fi
+                press_enter
+                ;;
+            2)
+                echo ""
+                refresh_game_progress_profile_menu >/dev/null 2>&1 || true
+                log_info "装备槽位状态已刷新"
+                press_enter
+                ;;
+            0)
+                return
+                ;;
+            *)
+                log_error "无效选择"
+                press_enter
+                ;;
+        esac
+    done
     return
     
     echo -e "${CYAN}选择 AI 提供商:${NC}"
@@ -7969,19 +8656,21 @@ manage_super_skills() {
     echo -e "${WHITE}🚀 超级插件管理${NC}"
     print_divider
     echo ""
-    print_menu_item "1" "安装 Baoyu 系列技能（GitHub）" "📚"
-    print_menu_item "2" "安装 wechat-skills（GitHub）" "📝"
-    print_menu_item "3" "导入 ai-meeting-notes（本机）" "🗒️"
-    print_menu_item "4" "导入 tmux（本机）" "🧰"
+    print_menu_item "1" "同步高级技能包（本地：NotebookLM + Baoyu 全套）" "📦"
+    print_menu_item "2" "安装 Baoyu 系列技能（GitHub）" "📚"
+    print_menu_item "3" "安装 wechat-skills（GitHub）" "📝"
+    print_menu_item "4" "导入 ai-meeting-notes（本机）" "🗒️"
+    print_menu_item "5" "导入 tmux（本机）" "🧰"
     print_menu_item "0" "返回上级菜单" "↩️"
     echo ""
-    read_input "${YELLOW}请选择 [0-4]: ${NC}" super_choice
+    read_input "${YELLOW}请选择 [0-5]: ${NC}" super_choice
 
     case "$super_choice" in
-        1) install_super_skill_from_repo "https://github.com/JimLiu/baoyu-skills.git" "baoyu-skills" ;;
-        2) install_super_skill_from_repo "https://github.com/gainubi/wechat-skills.git" "wechat-skills" ;;
-        3) install_super_skill_from_local "/Users/lichengyin/.codex/skills/ai-meeting-notes" "ai-meeting-notes" ;;
-        4) install_super_skill_from_local "/Users/lichengyin/.codex/skills/tmux" "tmux" ;;
+        1) sync_named_skills_from_bundle "$SUPER_CURATED_SKILLS_LIST" 0 ;;
+        2) install_super_skill_from_repo "https://github.com/JimLiu/baoyu-skills.git" "baoyu-skills" ;;
+        3) install_super_skill_from_repo "https://github.com/gainubi/wechat-skills.git" "wechat-skills" ;;
+        4) install_super_skill_from_local "/Users/lichengyin/.codex/skills/ai-meeting-notes" "ai-meeting-notes" ;;
+        5) install_super_skill_from_local "/Users/lichengyin/.codex/skills/tmux" "tmux" ;;
         0) return ;;
         *) log_error "无效选择" ;;
     esac
@@ -8128,8 +8817,29 @@ manage_skills() {
     clear_screen
     print_header
 
-    echo -e "${WHITE}🧩 Skills 管理${NC}"
+    echo -e "${WHITE}🌲 技能树祭坛${NC}"
     print_divider
+    echo ""
+    local recommended_tier tier_label basic_installed basic_total ext_installed ext_total installed_total
+    recommended_tier="$(infer_recommended_skill_tier_menu)"
+    case "$recommended_tier" in
+        basic) tier_label="基础技能树（Level 1+）" ;;
+        extended) tier_label="进阶技能树（Level 8+）" ;;
+        super) tier_label="终极技能树（Level 15+）" ;;
+        *) tier_label="基础技能树（Level 1+）" ;;
+    esac
+    basic_installed="$(count_installed_skills_from_list_menu "$PROFILE_BASIC_SKILLS")"
+    basic_total="$(count_words_menu "$PROFILE_BASIC_SKILLS")"
+    ext_installed="$(count_installed_skills_from_list_menu "$PROFILE_EXTENDED_SKILLS")"
+    ext_total="$(count_words_menu "$PROFILE_EXTENDED_SKILLS")"
+    if [ -d "$CONFIG_DIR/skills" ]; then
+        installed_total="$(find "$CONFIG_DIR/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    else
+        installed_total="0"
+    fi
+
+    echo -e "  ${CYAN}推荐树层:${NC} ${WHITE}${tier_label}${NC}"
+    echo -e "  ${CYAN}基础树:${NC} ${basic_installed}/${basic_total}    ${CYAN}进阶树:${NC} ${ext_installed}/${ext_total}    ${CYAN}总技能:${NC} ${installed_total}"
     echo ""
     print_menu_item "1" "查看已安装 Skills" "📋"
     print_menu_item "2" "安装默认技能包（仅补齐缺失）" "📦"
@@ -8141,9 +8851,10 @@ manage_skills() {
     print_menu_item "8" "删除已安装 Skill" "🗑️"
     print_menu_item "9" "安装/修复 Skills 运行依赖" "🛠️"
     print_menu_item "10" "查看 Skill 使用提示" "📘"
+    print_menu_item "11" "查看技能树总览（分层/缺失/解锁）" "📊"
     print_menu_item "0" "返回主菜单" "↩️"
     echo ""
-    read_input "${YELLOW}请选择 [0-10]: ${NC}" skills_choice
+    read_input "${YELLOW}请选择 [0-11]: ${NC}" skills_choice
 
     case "$skills_choice" in
         1)
@@ -8177,6 +8888,9 @@ manage_skills() {
             ;;
         10)
             show_skill_usage_guide
+            ;;
+        11)
+            show_skill_tree_status_menu
             ;;
         0)
             return
@@ -10490,20 +11204,20 @@ show_main_menu() {
     clear_screen
     print_header
     
-    echo -e "${WHITE}请选择操作:${NC}"
+    echo -e "${WHITE}请选择神殿操作:${NC}"
     echo ""
     
-    print_menu_item "1" "系统状态" "📊"
-    print_menu_item "2" "AI 模型配置（官方）" "🤖"
-    print_menu_item "3" "官方消息渠道插件（官方）" "📡"
-    print_menu_item "4" "安全设置" "🔒"
-    print_menu_item "5" "Skills 管理（官方/增强/超级）" "🧩"
-    print_menu_item "6" "快速测试" "🧪"
-    print_menu_item "7" "高级设置" "🔧"
-    print_menu_item "8" "查看当前配置" "📋"
-    print_menu_item "9" "身份与个性配置" "👤"
-    print_menu_item "10" "服务管理" "⚡"
-    print_menu_item "11" "配置修复 / 迁移（保留记忆）" "🩺"
+    print_menu_item "1" "角色面板（系统状态）" "🎮"
+    print_menu_item "2" "装备工坊（AI 模型配置）" "⚔️"
+    print_menu_item "3" "传送门（官方消息渠道插件）" "🌀"
+    print_menu_item "4" "圣殿法则（安全设置）" "🔒"
+    print_menu_item "5" "技能树祭坛（Skills 管理）" "🌲"
+    print_menu_item "6" "试炼场（快速测试）" "🧪"
+    print_menu_item "7" "大师工坊（高级设置）" "🛠️"
+    print_menu_item "8" "世界之书（查看当前配置）" "📜"
+    print_menu_item "9" "职业神殿（身份与个性）" "🧙"
+    print_menu_item "10" "营地管理（服务管理）" "🏕️"
+    print_menu_item "11" "修复祭坛（配置修复 / 迁移）" "🩺"
     echo ""
     print_menu_item "0" "退出" "🚪"
     echo ""
