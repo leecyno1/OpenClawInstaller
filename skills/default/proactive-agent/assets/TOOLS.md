@@ -32,15 +32,6 @@ tool-name --common-flag
 
 ---
 
-## Cron Delivery Baseline (Default)
-
-- cron 默认使用 `agentTurn + isolated`
-- `timeoutSeconds=604800`
-- 任务内部默认不要主动调用 `message` 工具投递结果
-- 任务应直接输出结果，由 cron 的 `delivery` 机制统一送达
-
----
-
 ## Writing Preferences
 
 [Document any preferences about writing style, voice, etc.]

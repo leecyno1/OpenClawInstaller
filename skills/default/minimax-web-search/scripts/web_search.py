@@ -24,12 +24,10 @@ def call_mcp(query):
         print("Error: API Key not found.", file=sys.stderr)
         sys.exit(1)
 
-    api_host = os.environ.get('MINIMAX_API_HOST', 'https://api.minimaxi.com')
-
     env = {
         'MINIMAX_API_KEY': api_key,
         'MINIMAX_MCP_BASE_PATH': os.path.expanduser('~/.openclaw/workspace/minimax-output'),
-        'MINIMAX_API_HOST': api_host
+        'MINIMAX_API_HOST': 'https://api.minimaxi.com'
     }
 
     # MCP protocol: send initialize + tool call in one go

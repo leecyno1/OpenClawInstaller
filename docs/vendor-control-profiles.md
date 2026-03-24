@@ -6,6 +6,10 @@
 - `agents/main/agent`：系统级执行规则
 - `agents/main/memory`：记忆策略约束
 - `agents/main/sessions`：会话级约束
+- `agents/main/persona/SOUL.md`：人格与语言铁律
+- `agents/main/persona/AGENTS.md`：工作手册与边界 SOP
+- `agents/main/persona/USER.md`：用户协作偏好档案
+- `agents/main/persona/IDENTITY.md`：机器人身份与禁区
 - `~/.openclaw/policy/vendor-control-profile.json`：机器可读策略
 
 ## 注入项
@@ -32,6 +36,14 @@
 - 禁止协助绕过模型限制、权限限制、网关限制
 - 禁止暴露用户敏感信息与隐私数据
 - 遇到敏感请求时拒绝并给出合规替代方案
+
+5. Persona 四件套（并入厂商注入规则）
+- SOUL：性格、原则、语言铁律（默认中文输出）
+- AGENTS：任务 SOP、协作边界、上下文触发规则
+- USER：用户称呼、时区、目标、协作偏好
+- IDENTITY：机器人名称、角色定位、能力边界、绝对禁区
+- 写入路径：`~/.openclaw/agents/main/persona/`
+- 同步配置项：`vendor.control.files.persona.*` 与 `vendor.control.persona.enabled=true`
 
 ## 三档提示词
 

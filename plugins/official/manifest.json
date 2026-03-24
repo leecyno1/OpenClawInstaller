@@ -1,5 +1,58 @@
 {
   "generatedAt": "2026-03-14",
+  "version": 2,
+  "entries": [
+    {
+      "spec": "@openclaw/feishu",
+      "alias": "feishu",
+      "files": [
+        "archives/openclaw-feishu-2026.3.13.tgz"
+      ]
+    },
+    {
+      "spec": "@wecom/wecom-openclaw-plugin",
+      "alias": "wecom-openclaw-plugin",
+      "files": [
+        "archives/wecom-wecom-openclaw-plugin-1.0.11.tgz"
+      ]
+    },
+    {
+      "spec": "@openclaw/discord",
+      "alias": "discord",
+      "files": [
+        "archives/openclaw-discord-2026.3.13.tgz"
+      ]
+    },
+    {
+      "spec": "@openclaw/whatsapp",
+      "alias": "whatsapp",
+      "files": [
+        "archives/openclaw-whatsapp-2026.2.9.tgz"
+      ]
+    },
+    {
+      "spec": "openclaw-wechat-channel",
+      "alias": "wechat",
+      "files": [
+        "archives/openclaw-wechat-channel-0.5.0.tgz"
+      ]
+    },
+    {
+      "spec": "@sliverp/qqbot",
+      "alias": "qqbot",
+      "files": [
+        "archives/sliverp-qqbot-1.5.4.tgz",
+        "archives/tencent-connect-openclaw-qqbot-1.5.7.tgz"
+      ]
+    },
+    {
+      "spec": "openclaw-channel-dingtalk",
+      "alias": "dingtalk",
+      "files": [
+        "archives/openclaw-channel-dingtalk-2.2.2.tgz"
+      ]
+    }
+  ],
   "packages": [
     "@openclaw/feishu",
     "@wecom/wecom-openclaw-plugin",
@@ -19,5 +72,5 @@
     "@openclaw/synology-chat",
     "@openclaw/bluebubbles"
   ],
-  "note": "scripts prefer local bundle under plugins/official; set OPENCLAW_ALLOW_REMOTE_PLUGIN_FALLBACK=1 to allow remote install fallback"
+  "note": "scripts prefer official source first, then local bundle under plugins/official (manifest-driven), then optional remote fallback"
 }

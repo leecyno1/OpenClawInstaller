@@ -56,6 +56,7 @@
 - [快速开始](#快速开始)
 - [操作手册](#操作手册)
 - [配置说明](#配置说明)
+- [职业人格（7选1）](#职业人格7选1)
 - [默认技能包](#默认技能包)
 - [渠道配置文档](#渠道配置文档)
 - [飞书插件说明](#飞书插件说明)
@@ -298,6 +299,20 @@ auto-install-Openclaw 当前推荐配置模型：
 └── logs/
 ```
 
+## 职业人格（7选1）
+
+安装脚本与配置菜单已支持 7 选 1 的职业人格初始化，并可在后续随时切换：
+
+- 菜单入口：`10 身份与个性配置`
+- 角色说明文档：`docs/persona-roles.md`
+- 运行时写入：
+  - `~/.openclaw/agents/main/persona/SOUL.md`
+  - `~/.openclaw/agents/main/persona/AGENTS.md`
+  - `~/.openclaw/agents/main/persona/USER.md`
+  - `~/.openclaw/agents/main/persona/IDENTITY.md`
+
+说明：职业人格仅影响身份、工作风格与技能建议，不覆盖安全与 token 规划规则。
+
 ## 默认技能包
 
 安装脚本会默认将仓库内 `skills/default/*` 同步到 `~/.openclaw/skills/`（已存在同名技能默认保留，不覆盖）。  
@@ -353,14 +368,20 @@ skills/requirements-runtime.txt
 - stock-monitor-skill（Stock Monitor）
 - multi-search-engine（Multi Search Engine）
 - akshare-stock（AkShare Stock）
+- agentmail
+- agentmail-cli
+- agentmail-mcp
+- agentmail-toolkit
 
 ## 渠道配置文档
 
 - 仓库文档：`docs/channels-configuration-guide.md`
 - 上游索引：`docs/upstream-sources.md`
+- Skills 总览：`docs/skills-guides.md`
 - 安装后本地文档：`~/.openclaw/docs/channels-configuration-guide.md`
 - 安装后本地索引：`~/.openclaw/docs/upstream-sources.md`
 - 安装后 Skill：`~/.openclaw/skills/channel-setup-assistant/SKILL.md`
+- 安装后 Skills 指南：`~/.openclaw/skills/<skill>/GUIDE.md`
 
 该文档覆盖官方与社区渠道（含飞书、微信、QQ、企业微信）的字段要求、菜单路径、排障命令与版本策略。
 
