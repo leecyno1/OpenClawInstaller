@@ -462,6 +462,16 @@ ${INSTALLER_NAME} (OpenClaw 安装增强版)
   --reset-chat-history                安装后重置聊天历史 (默认开启)
   --keep-chat-history                 安装后保留历史聊天记录
   --rule-profile <low|medium|high|none> token规划规则档位 (默认: medium)
+  --persona <role>                    人格角色: druid|assassin|mage|summoner|warrior|paladin|designer
+  --model-route <route>               记录前端模型路由选择
+  --skill-pack <low|medium|high>      记录前端技能包选择
+  --token-rule <low|medium|high|none> 等价于 --rule-profile
+  --assistant-name <name>             机器人名称
+  --user-goal <text>                  用户主要目标
+  --assistant-personality <text>      机器人性格
+  --assistant-work-mode <text>        机器人工作方式
+  --tool-suite <csv>                  记录前端装备工具套装
+  --security <csv>                    记录前端安全策略列表
   --help, -h                           显示帮助
 
 环境变量:
@@ -589,6 +599,48 @@ parse_args() {
                 ;;
             --rule-profile)
                 RULE_PROFILE_SELECTED="$2"
+                shift 2
+                ;;
+            --token-rule)
+                RULE_PROFILE_SELECTED="$2"
+                shift 2
+                ;;
+            --persona)
+                PERSONA_ROLE_SELECTED="$(normalize_persona_role_id_install "$2")"
+                export OPENCLAW_PERSONA_ROLE="$PERSONA_ROLE_SELECTED"
+                shift 2
+                ;;
+            --model-route)
+                export OPENCLAW_WEB_MODEL_ROUTE="$2"
+                shift 2
+                ;;
+            --skill-pack)
+                export OPENCLAW_WEB_SKILL_PACK="$2"
+                shift 2
+                ;;
+            --assistant-name)
+                export OPENCLAW_ASSISTANT_NAME="$2"
+                shift 2
+                ;;
+            --user-goal)
+                export OPENCLAW_USER_GOAL="$2"
+                shift 2
+                ;;
+            --assistant-personality)
+                export OPENCLAW_ASSISTANT_PERSONALITY="$2"
+                shift 2
+                ;;
+            --assistant-work-mode)
+                export OPENCLAW_ASSISTANT_WORK_MODE="$2"
+                export OPENCLAW_ASSISTANT_WORK_STYLE="$2"
+                shift 2
+                ;;
+            --tool-suite)
+                export OPENCLAW_WEB_TOOLS="$2"
+                shift 2
+                ;;
+            --security)
+                export OPENCLAW_WEB_SECURITY="$2"
                 shift 2
                 ;;
             --help|-h)

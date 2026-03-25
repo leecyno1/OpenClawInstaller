@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw 配置中心 - 人格选择</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Noto+Serif+SC:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <section class="hero-stage" aria-label="七职业合影">
+        <img
+          id="groupPortrait"
+          src="./assets/group-heroes-16x9.png"
+          alt="七位人格角色合影"
+        />
+        <header class="top-banner top-banner-overlay">
+          <p class="badge">OPENCLAW CONFIG • STAGE I</p>
+          <h1>人格圣殿</h1>
+          <p class="subtitle">直接点击合影中的角色。下方会切换对应立绘与人格说明。</p>
+        </header>
+        <svg
+          class="hero-map"
+          id="heroMap"
+          viewBox="0 0 1376 768"
+          aria-label="角色选择热点"
+        >
+          <defs>
+            <filter id="roleAura" x="-40%" y="-35%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="18" result="blur" />
+              <feColorMatrix
+                in="blur"
+                type="matrix"
+                values="1 0 0 0 0
+                        0 1 0 0 0
+                        0 0 1 0 0
+                        0 0 0 22 -8"
+                result="aura"
+              />
+              <feMerge>
+                <feMergeNode in="aura" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <filter id="nameGlow" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="3.5" result="soft" />
+              <feMerge>
+                <feMergeNode in="soft" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <g class="map-node active" data-role="druid">
+            <ellipse class="map-ground" cx="236" cy="640" rx="72" ry="20" />
+            <polygon points="176,164 224,96 292,106 330,206 320,636 266,694 184,690 146,294" />
+            <text x="236" y="720">I · 德鲁伊</text>
+          </g>
+          <g class="map-node" data-role="assassin">
+            <ellipse class="map-ground" cx="410" cy="644" rx="62" ry="18" />
+            <polygon points="354,168 394,118 446,120 484,202 474,638 434,696 360,694 332,268" />
+            <text x="413" y="720">II · 刺客</text>
+          </g>
+          <g class="map-node" data-role="mage">
+            <ellipse class="map-ground" cx="592" cy="642" rx="74" ry="20" />
+            <polygon points="516,146 566,94 640,104 686,214 664,642 624,698 550,698 500,252" />
+            <text x="592" y="720">III · 大法师</text>
+          </g>
+          <g class="map-node" data-role="summoner">
+            <ellipse class="map-ground" cx="710" cy="646" rx="54" ry="16" />
+            <polygon points="668,204 702,164 742,168 770,246 756,640 722,696 662,696 640,296" />
+            <text x="713" y="720">IV · 召唤师</text>
+          </g>
+          <g class="map-node" data-role="warrior">
+            <ellipse class="map-ground" cx="908" cy="648" rx="76" ry="22" />
+            <polygon points="826,146 886,92 958,106 998,230 980,652 934,706 856,704 804,254" />
+            <text x="910" y="720">V · 战士</text>
+          </g>
+          <g class="map-node" data-role="paladin">
+            <ellipse class="map-ground" cx="1080" cy="650" rx="68" ry="20" />
+            <polygon points="1016,146 1062,108 1128,116 1166,228 1146,656 1104,708 1036,706 992,258" />
+            <text x="1081" y="720">VI · 圣骑士</text>
+          </g>
+          <g class="map-node" data-role="archer">
+            <ellipse class="map-ground" cx="1250" cy="646" rx="60" ry="18" />
+            <polygon points="1188,132 1234,106 1298,122 1330,216 1308,648 1268,704 1204,704 1168,242" />
+            <text x="1253" y="720">VII · 弓箭手</text>
+          </g>
+        </svg>
+        <button class="next-step-cue" id="nextStepBtn" type="button">
+          <span class="next-step-label">下一步</span>
+          <span class="next-step-text">进入技能树与装备库</span>
+        </button>
+      </section>
+
+      <main class="persona-layout">
+        <section class="portrait-panel" aria-live="polite">
+          <div class="portrait-stage" id="portraitStage">
+            <div class="portrait-card" id="portraitCard">
+              <img id="rolePortrait" src="./assets/role-druid.png" alt="德鲁伊立绘" />
+              <span class="portrait-sheen"></span>
+              <span class="portrait-frame"></span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="info-panel">
+          <div class="info-head">
+            <p class="info-kicker" id="roleClass">通用总管</p>
+            <h2 id="roleTitle">万金油 · 德鲁伊</h2>
+            <p id="roleDesc">
+              全能型人格，适合绝大多数用户，擅长把碎片需求整合为可执行计划，并持续跟进任务闭环。
+            </p>
+          </div>
+
+          <section class="info-block">
+            <h3>简介</h3>
+            <p id="roleIntro"></p>
+          </section>
+
+          <section class="info-block">
+            <h3>掌握技能</h3>
+            <ul class="tag-list" id="roleSkills"></ul>
+          </section>
+
+          <section class="info-block">
+            <h3>适配模型</h3>
+            <ul class="model-list" id="roleModels"></ul>
+          </section>
+
+          <section class="info-block">
+            <h3>适合任务</h3>
+            <ul class="task-list" id="roleTasks"></ul>
+          </section>
+
+          <div class="actions">
+            <button id="confirmBtn" type="button">确认人格</button>
+            <button id="resetBtn" type="button">重置为默认</button>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

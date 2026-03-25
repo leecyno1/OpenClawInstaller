@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenClaw 配置中心 - 技能树与装备库</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Noto+Serif+SC:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="loadout-body">
+    <div class="app-shell loadout-shell">
+      <header class="loadout-banner">
+        <div>
+          <p class="badge">OPENCLAW CONFIG • STAGE II</p>
+          <h1>技能树与装备库</h1>
+          <p class="subtitle">人格已锁定，下面开始配置该角色的技能流派、工具装备和实战偏好。</p>
+        </div>
+        <div class="loadout-actions">
+          <a class="secondary-link" href="./index.html">返回人格圣殿</a>
+          <button id="proceedStageBtn" type="button">进入下一阶段</button>
+        </div>
+      </header>
+
+      <main class="loadout-layout">
+        <section class="loadout-hero-card">
+          <div class="loadout-portrait-frame">
+            <img id="loadoutPortrait" src="./assets/role-druid.png" alt="人格立绘" />
+          </div>
+          <div class="loadout-hero-meta">
+            <p class="info-kicker" id="loadoutClass">通用总管</p>
+            <h2 id="loadoutTitle">万金油 · 德鲁伊</h2>
+            <p id="loadoutDesc"></p>
+            <dl class="stat-grid">
+              <div class="stat-item">
+                <dt>专精</dt>
+                <dd id="loadoutSpecialty">综合协同</dd>
+              </div>
+              <div class="stat-item">
+                <dt>主模型</dt>
+                <dd id="loadoutPrimaryModel">Claude</dd>
+              </div>
+              <div class="stat-item">
+                <dt>节奏</dt>
+                <dd id="loadoutTempo">稳定推进</dd>
+              </div>
+              <div class="stat-item">
+                <dt>配置状态</dt>
+                <dd>待注入</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        <section class="loadout-grid">
+          <article class="loadout-panel">
+            <div class="panel-head">
+              <p class="panel-index">Skill Tree</p>
+              <h3>技能树</h3>
+            </div>
+            <div class="skill-tree" id="skillTree"></div>
+          </article>
+
+          <article class="loadout-panel">
+            <div class="panel-head">
+              <p class="panel-index">Armory</p>
+              <h3>装备库</h3>
+            </div>
+            <div class="gear-grid" id="gearGrid"></div>
+          </article>
+
+          <article class="loadout-panel full-span">
+            <div class="panel-head">
+              <p class="panel-index">Battle Setup</p>
+              <h3>实战编排</h3>
+            </div>
+            <div class="tactic-grid">
+              <section>
+                <h4>推荐工作流</h4>
+                <ol id="workflowList" class="workflow-list"></ol>
+              </section>
+              <section>
+                <h4>建议开启</h4>
+                <ul id="toggleList" class="simple-list"></ul>
+              </section>
+              <section>
+                <h4>适合任务</h4>
+                <ul id="taskOverview" class="simple-list"></ul>
+              </section>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./loadout.js"></script>
+  </body>
+</html>
