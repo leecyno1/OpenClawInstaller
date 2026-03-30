@@ -8622,6 +8622,43 @@ refresh_cached_installer_repo_menu() {
     return 0
 }
 
+ensure_installer_repo_cache_menu() {
+    local cache_root
+    local cache_repo
+    local tmp_repo
+    local url
+
+    cache_root="$CONFIG_DIR/.cache"
+    cache_repo="$cache_root/auto-install-openclaw-repo"
+    mkdir -p "$cache_root" 2>/dev/null || true
+
+    if ! command -v git >/dev/null 2>&1; then
+        log_warn "未检测到 git，无法刷新安装仓库缓存，将继续使用本地已有脚本。"
+        [ -d "$cache_repo" ]
+        return $?
+    fi
+
+    if [ -d "$cache_repo/.git" ]; then
+        refresh_cached_installer_repo_menu "$cache_repo" && return 0
+        log_warn "刷新安装仓库缓存失败，尝试重建缓存..."
+        rm -rf "$cache_repo" 2>/dev/null || true
+    fi
+
+    tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+    for url in $(get_installer_repo_urls); do
+        rm -rf "$tmp_repo" 2>/dev/null || true
+        tmp_repo="$(mktemp -d "$cache_root/repo.XXXXXX")"
+        if git clone --depth 1 "$url" "$tmp_repo" >/dev/null 2>&1; then
+            rm -rf "$cache_repo" 2>/dev/null || true
+            mv "$tmp_repo" "$cache_repo"
+            return 0
+        fi
+    done
+
+    rm -rf "$tmp_repo" 2>/dev/null || true
+    [ -d "$cache_repo" ]
+}
+
 count_missing_default_skill_sentinels_menu() {
     local check_dir="$1"
     local missing=0
@@ -10689,7 +10726,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=STAR_BACKEND_HOST=0.0.0.0
 Environment=STAR_BACKEND_PORT=${world_port}
 ExecStart=/bin/bash -lc 'source "${env_file}" >/dev/null 2>&1 || true; "${service_home}/.openclaw/lobster-world.sh" start'
@@ -10714,7 +10750,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=PROJECTION_API_HOST=${DEFAULT_PROJECTION_API_HOST}
 Environment=PROJECTION_API_PORT=${projection_port}
 ExecStart=/bin/bash -lc 'source "${env_file}" >/dev/null 2>&1 || true; "${service_home}/.openclaw/lobster-projection-api.sh" start'
@@ -10739,7 +10774,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=OPENCLAW_STATUS_URL=${openclaw_status_url}
 Environment=PROJECTION_API_HOST=${DEFAULT_PROJECTION_API_HOST}
 Environment=PROJECTION_API_PORT=${projection_port}
@@ -10774,6 +10808,8 @@ install_pixel_house_stack_menu() {
     local gateway_port
     local openclaw_status_url
     local projection_ingest_url
+
+    ensure_installer_repo_cache_menu >/dev/null 2>&1 || true
 
     world_script="$(resolve_pixel_house_repo_file_menu "scripts/lobster-world.sh" || true)"
     projection_script="$(resolve_pixel_house_repo_file_menu "subprojects/lobster-sanctum-ui/projection-api.sh" || true)"

@@ -3070,7 +3070,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=STAR_BACKEND_HOST=0.0.0.0
 Environment=STAR_BACKEND_PORT=${LOBSTER_WORLD_PORT_DEFAULT}
 ExecStart=/bin/bash -lc 'source "${env_file}" >/dev/null 2>&1 || true; "${service_home}/.openclaw/lobster-world.sh" start'
@@ -3095,7 +3094,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=PROJECTION_API_HOST=${PROJECTION_API_HOST_DEFAULT}
 Environment=PROJECTION_API_PORT=${PROJECTION_API_PORT_DEFAULT}
 ExecStart=/bin/bash -lc 'source "${env_file}" >/dev/null 2>&1 || true; "${service_home}/.openclaw/lobster-projection-api.sh" start'
@@ -3120,7 +3118,6 @@ Type=forking
 User=${service_user}
 Group=${service_group}
 WorkingDirectory=${service_home}
-EnvironmentFile=-${env_file}
 Environment=OPENCLAW_STATUS_URL=${gateway_status_url}
 Environment=PROJECTION_API_HOST=${PROJECTION_API_HOST_DEFAULT}
 Environment=PROJECTION_API_PORT=${PROJECTION_API_PORT_DEFAULT}
