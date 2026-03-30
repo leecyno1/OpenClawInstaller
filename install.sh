@@ -3400,12 +3400,6 @@ normalize_channel_policy_in_json_install() {
       "allowInsecureAuth": true,
       "dangerouslyDisableDeviceAuth": true
     }
-  },
-  "channels": {
-    "feishu": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
-    "telegram": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
-    "whatsapp": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] },
-    "imessage": { "dmPolicy": "open", "groupPolicy": "open", "allowFrom": ["*"], "groupAllowFrom": ["*"] }
   }
 }
 EOF
@@ -3418,27 +3412,6 @@ EOF
             | .gateway.controlUi = (.gateway.controlUi // {})
             | .gateway.controlUi.allowInsecureAuth = true
             | .gateway.controlUi.dangerouslyDisableDeviceAuth = true
-            | .channels = (.channels // {})
-            | (.channels.feishu //= {})
-            | (.channels.telegram //= {})
-            | (.channels.whatsapp //= {})
-            | (.channels.imessage //= {})
-            | .channels.feishu.dmPolicy = "open"
-            | .channels.feishu.groupPolicy = "open"
-            | .channels.feishu.allowFrom = ["*"]
-            | .channels.feishu.groupAllowFrom = ["*"]
-            | .channels.telegram.dmPolicy = "open"
-            | .channels.telegram.groupPolicy = "open"
-            | .channels.telegram.allowFrom = ["*"]
-            | .channels.telegram.groupAllowFrom = ["*"]
-            | .channels.whatsapp.dmPolicy = "open"
-            | .channels.whatsapp.groupPolicy = "open"
-            | .channels.whatsapp.allowFrom = ["*"]
-            | .channels.whatsapp.groupAllowFrom = ["*"]
-            | .channels.imessage.dmPolicy = "open"
-            | .channels.imessage.groupPolicy = "open"
-            | .channels.imessage.allowFrom = ["*"]
-            | .channels.imessage.groupAllowFrom = ["*"]
         ' "$cfg" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
             mv "$tmp" "$cfg"
             return 0
@@ -3449,7 +3422,6 @@ EOF
         python3 - "$cfg" <<'PY' 2>/dev/null || true
 import json, sys
 path = sys.argv[1]
-channels = ("feishu","telegram","whatsapp","imessage")
 try:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -3463,19 +3435,6 @@ try:
     control_ui["dangerouslyDisableDeviceAuth"] = True
     gateway["controlUi"] = control_ui
     data["gateway"] = gateway
-    root = data.get("channels") or {}
-    if not isinstance(root, dict):
-        root = {}
-    for ch in channels:
-        item = root.get(ch) or {}
-        if not isinstance(item, dict):
-            item = {}
-        item["dmPolicy"] = "open"
-        item["groupPolicy"] = "open"
-        item["allowFrom"] = ["*"]
-        item["groupAllowFrom"] = ["*"]
-        root[ch] = item
-    data["channels"] = root
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 except Exception:
@@ -3492,12 +3451,20 @@ openclaw_config_set_if_changed_install() {
         return 0
     fi
     local current
-    current="$(openclaw config get "$key" 2>/dev/null || true)"
+    if check_command timeout; then
+        current="$(timeout 15s openclaw config get "$key" 2>/dev/null || true)"
+    else
+        current="$(openclaw config get "$key" 2>/dev/null || true)"
+    fi
     current="$(echo "$current" | tr -d '\r' | sed 's/^"//; s/"$//')"
     if [ "$current" = "$value" ]; then
         return 0
     fi
-    openclaw config set "$key" "$value" >/dev/null 2>&1 || true
+    if check_command timeout; then
+        timeout 15s openclaw config set "$key" "$value" >/dev/null 2>&1 || true
+    else
+        openclaw config set "$key" "$value" >/dev/null 2>&1 || true
+    fi
 }
 
 apply_dashboard_pairing_bypass_install() {
@@ -4065,15 +4032,6 @@ init_openclaw_config() {
             openclaw_config_set_if_changed_install "gateway.customBindHost" "$GATEWAY_CUSTOM_BIND_HOST"
         openclaw_config_set_if_changed_install "gateway.port" "$GATEWAY_PORT"
         apply_dashboard_pairing_bypass_install
-        # 默认放开消息渠道 DM/群聊准入，避免渠道侧触发 pairing 审批
-        openclaw_config_set_if_changed_install "channels.feishu.dmPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.feishu.groupPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.telegram.dmPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.telegram.groupPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.whatsapp.dmPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.whatsapp.groupPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.imessage.dmPolicy" "open"
-        openclaw_config_set_if_changed_install "channels.imessage.groupPolicy" "open"
         log_info "Gateway 模式已设置为 local（bind=${GATEWAY_BIND}, port=${GATEWAY_PORT}）"
 
         local auth_mode
@@ -5474,18 +5432,22 @@ test_api_connection() {
     echo -e "${WHITE}  第 2 步: 测试 API 连接${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     local test_passed=false
-    
+    if [ "$NO_PROMPT" = "1" ] && [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
+        log_info "全自动模式已启用，跳过交互式 API 探针测试（可稍后手动运行: openclaw models status --probe --check）"
+        return 0
+    fi
+
     # 确保环境变量已加载
     local env_file="$HOME/.openclaw/env"
     [ -f "$env_file" ] && source "$env_file"
-    
+
     if ! check_command openclaw; then
         echo -e "${YELLOW}OpenClaw 未安装，跳过测试${NC}"
         return 0
     fi
-    
+
     local current_model_ref
     current_model_ref="$(get_current_model_ref || true)"
     echo -e "${CYAN}当前模型配置:${NC}"
@@ -5497,7 +5459,11 @@ test_api_connection() {
     local probe_output=""
     local probe_exit=0
     set +e
-    probe_output=$(openclaw models status --probe --check --json 2>&1)
+    if check_command timeout; then
+        probe_output=$(timeout 30s openclaw models status --probe --check --json 2>&1)
+    else
+        probe_output=$(openclaw models status --probe --check --json 2>&1)
+    fi
     probe_exit=$?
     set -e
 
@@ -5513,12 +5479,20 @@ test_api_connection() {
         local agent_exit=1
         if [ -n "$current_model_ref" ]; then
             set +e
-            agent_output=$(openclaw agent --local --model "$current_model_ref" --message "只回复 OK" 2>&1)
+            if check_command timeout; then
+                agent_output=$(timeout 30s openclaw agent --local --model "$current_model_ref" --message "只回复 OK" 2>&1)
+            else
+                agent_output=$(openclaw agent --local --model "$current_model_ref" --message "只回复 OK" 2>&1)
+            fi
             agent_exit=$?
             set -e
         else
             set +e
-            agent_output=$(openclaw agent --local --message "只回复 OK" 2>&1)
+            if check_command timeout; then
+                agent_output=$(timeout 30s openclaw agent --local --message "只回复 OK" 2>&1)
+            else
+                agent_output=$(openclaw agent --local --message "只回复 OK" 2>&1)
+            fi
             agent_exit=$?
             set -e
         fi
@@ -5546,7 +5520,7 @@ test_api_connection() {
             exit 1
         fi
     fi
-    
+
     return 0
 }
 
