@@ -212,6 +212,10 @@ GATEWAY_SERVICE_INSTALLED_ONCE_MENU=0
 
 # ================================ 工具函数 ================================
 
+check_command() {
+    command -v "$1" >/dev/null 2>&1
+}
+
 clear_screen() {
     if [ -n "${TERM:-}" ] && [ "${TERM}" != "dumb" ] && command -v clear >/dev/null 2>&1; then
         clear
