@@ -9,13 +9,17 @@
 > ```bash
 > curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/install.sh | bash -s -- --auto-confirm-all
 > ```
-> **配置命令（安装后立即执行）**
+> **配置菜单（安装后推荐）**
 > ```bash
-> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
+> bash ~/.openclaw/config-menu.sh
 > ```
 > **配置修复 / 迁移（保留记忆与对话）**
 > ```bash
-> curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash -s -- --repair-config
+> bash ~/.openclaw/config-menu.sh --repair-config
+> ```
+> **像素小屋补装 / 修复并自动挂钩 OpenClaw**
+> ```bash
+> bash ~/.openclaw/config-menu.sh --install-pixel-house
 > ```
 > **多源容灾安装（备用）**
 > ```bash
@@ -161,16 +165,22 @@ curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://
 curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/install.sh | bash -s -- --auto-confirm-all
 ```
 
-### 配置命令（建议紧接安装执行）
+### 配置菜单（建议安装后立即执行）
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o config-menu.sh && bash config-menu.sh
+bash ~/.openclaw/config-menu.sh
 ```
 
 ### 配置修复 / 迁移（保留记忆与对话）
 
 ```bash
-curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 25 https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh | bash -s -- --repair-config
+bash ~/.openclaw/config-menu.sh --repair-config
+```
+
+### 像素小屋补装 / 修复并自动挂钩 OpenClaw
+
+```bash
+bash ~/.openclaw/config-menu.sh --install-pixel-house
 ```
 
 ### 配置命令（多源容灾备用）
@@ -240,7 +250,7 @@ openclaw gateway status
 ### 2) 打开配置菜单
 
 ```bash
-bash ./config-menu.sh
+bash ~/.openclaw/config-menu.sh
 ```
 
 常用菜单路径：
@@ -251,13 +261,13 @@ bash ./config-menu.sh
 - `[5]` Skills 管理（官方/增强/超级 + 默认技能包同步）
 - `[5]` Skills 管理 → `[11]` Skills 安装概览（分层/缺失）
 - `[5]` Skills 管理 → `[9]` 安装/修复 Skills 运行依赖
-- `[6]` 连通性测试
-- `[7]` 高级设置（升级、备份、恢复）
-- `[7]` 高级设置 → `[8]` AI 自动修复 OpenClaw（集成 `auto-fix-openclaw`，支持 Codex/Claude CLI）
-- `[10]` 服务管理 → `[8]` 卸载中心（全局卸载 / 目录卸载保留 skills+plugins / 完全卸载）
-- `[7]` 高级设置 → `[4]` 一键重置（初始化）：清空 API Key、渠道配对与敏感配置（保留 skills/plugins）
-- `[11]` 配置修复与迁移（`--repair-config` 同能力，保留记忆与会话）
-- `[1]` 系统状态 → `[5]` 运行里程碑（V1 占位）
+- `[6]` 高级设置（升级、备份、恢复）
+- `[6]` 高级设置 → `[8]` AI 自动修复 OpenClaw（集成 `auto-fix-openclaw`，支持 Codex/Claude CLI）
+- `[6]` 高级设置 → `[10]` 配置修复 / 迁移（`--repair-config` 同能力，保留记忆与会话）
+- `[6]` 高级设置 → `[4]` 一键重置（初始化）：清空 API Key、渠道配对与敏感配置（保留 skills/plugins）
+- `[9]` 服务管理（含连通性） → `[5]` 连通性测试（API/渠道）
+- `[9]` 服务管理（含连通性） → `[8]` 卸载中心（全局卸载 / 目录卸载保留 skills+plugins / 完全卸载）
+- `[10]` 像素小屋 → `[1]` 安装/修复像素小屋并挂钩 OpenClaw
 
 AI 自动修复前置要求：
 
@@ -483,8 +493,8 @@ openclaw plugins update --all
 通过配置菜单升级：
 
 ```bash
-./config-menu.sh
-# [8] 高级设置 -> [6] 更新 OpenClaw
+bash ~/.openclaw/config-menu.sh
+# [6] 高级设置 -> [6] 更新 OpenClaw
 ```
 
 常用运维命令：

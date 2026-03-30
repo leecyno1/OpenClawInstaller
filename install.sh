@@ -196,7 +196,7 @@ print_exit_hint() {
     echo -e "${CYAN}后续可执行命令:${NC}"
     echo "  source ~/.openclaw/env && openclaw doctor"
     echo "  source ~/.openclaw/env && openclaw models status --probe --check"
-    echo "  bash ~/.openclaw/config-menu.sh  # 或 bash ./config-menu.sh"
+    echo "  bash ~/.openclaw/config-menu.sh"
     echo "  ~/.openclaw/lobster-world.sh start  # 启动像素小屋工作台"
     echo ""
 }
@@ -2938,12 +2938,48 @@ EOF
     chmod +x "$launcher" 2>/dev/null || true
 }
 
+install_config_menu_launcher() {
+    local launcher="$CONFIG_DIR/config-menu.sh"
+    local local_repo_root
+    local config_menu_script
+    local cache_repo
+
+    local_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    cache_repo="$CONFIG_DIR/.cache/auto-install-openclaw-repo"
+    config_menu_script="$local_repo_root/config-menu.sh"
+
+    cat > "$launcher" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+candidates=(
+  "$config_menu_script"
+  "\$HOME/.openclaw/.cache/auto-install-openclaw-repo/config-menu.sh"
+  "\$HOME/.openclaw/workspace/auto-install-openclaw/config-menu.sh"
+  "\$HOME/.openclaw/workspace/auto-install-Openclaw/config-menu.sh"
+)
+
+for script in "\${candidates[@]}"; do
+  if [ -f "\$script" ]; then
+    bash "\$script" "\$@"
+    exit \$?
+  fi
+done
+
+echo "[ERROR] 未找到配置菜单脚本（config-menu.sh）"
+echo "可手动下载后执行：curl -fsSL https://gitee.com/leecyno1/auto-install-openclaw/raw/main/config-menu.sh -o /tmp/config-menu.sh && bash /tmp/config-menu.sh"
+exit 1
+EOF
+    chmod +x "$launcher" 2>/dev/null || true
+}
+
 setup_lobster_world_defaults_install() {
     local world_script
     log_step "配置像素小屋默认参数..."
     upsert_env_export_install "STAR_BACKEND_PORT" "$LOBSTER_WORLD_PORT_DEFAULT"
     upsert_env_export_install "STAR_BACKEND_HOST" "0.0.0.0"
 
+    install_config_menu_launcher
     install_lobster_world_launcher
 
     world_script="$(resolve_lobster_world_script_install || true)"
@@ -3703,7 +3739,7 @@ install_channel_assets() {
 
 请优先使用：
 1) `openclaw onboard`（官方模型配置）
-2) `bash ~/.openclaw/config-menu.sh`（渠道配置）
+2) `bash ~/.openclaw/config-menu.sh`（统一配置入口）
 
 关键渠道推荐：
 - 飞书（官方）：`@openclaw/feishu`
@@ -5676,9 +5712,12 @@ print_success() {
     echo "  openclaw models status   # 查看模型配置"
     echo "  openclaw channels list   # 查看渠道列表"
     echo "  openclaw doctor          # 诊断问题"
-    echo "  ~/.openclaw/lobster-world.sh start  # 启动像素小屋工作台"
-    echo "  ~/.openclaw/lobster-world.sh stop   # 停止像素小屋工作台"
-    echo "  ~/.openclaw/lobster-world.sh status # 查看像素小屋状态"
+    echo "  bash ~/.openclaw/config-menu.sh                   # 打开统一配置菜单"
+    echo "  bash ~/.openclaw/config-menu.sh --repair-config  # 修复/迁移配置"
+    echo "  bash ~/.openclaw/config-menu.sh --install-pixel-house  # 补装像素小屋并挂钩 OpenClaw"
+    echo "  ~/.openclaw/lobster-world.sh start               # 启动像素小屋工作台"
+    echo "  ~/.openclaw/lobster-world.sh stop                # 停止像素小屋工作台"
+    echo "  ~/.openclaw/lobster-world.sh status              # 查看像素小屋状态"
     echo "  ~/.openclaw/docs/channels-configuration-guide.md  # 渠道配置文档"
     echo "  ~/.openclaw/skills/channel-setup-assistant/SKILL.md  # 渠道配置 Skill"
     echo "  ~/.openclaw/skills/      # 默认技能包目录"
@@ -5687,7 +5726,7 @@ print_success() {
     echo ""
     echo -e "${CYAN}像素小屋:${NC}"
     echo "  默认地址: http://127.0.0.1:${LOBSTER_WORLD_PORT_DEFAULT}"
-    echo "  配置菜单入口: 像素小屋（主菜单 11）"
+    echo "  配置菜单入口: 像素小屋（主菜单 10）"
     echo ""
     echo -e "${PURPLE}📚 官方文档: $OFFICIAL_DOCS_URL${NC}"
     echo -e "${PURPLE}💬 社区支持: https://github.com/$GITHUB_REPO/discussions${NC}"
@@ -5897,22 +5936,22 @@ main() {
     echo -e "${WHITE}           📝 配置菜单（命令行版）${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo -e "${GRAY}配置菜单支持: 官方/非官方渠道、Skills 管理、安全配置、服务管理等${NC}"
+    echo -e "${GRAY}配置菜单支持: 模型、官方渠道、Skills、权限、服务管理、像素小屋等${NC}"
     echo ""
     echo -e "${WHITE}💡 下次可以直接运行配置菜单:${NC}"
-    echo -e "   ${CYAN}bash ./config-menu.sh${NC}"
+    echo -e "   ${CYAN}bash ~/.openclaw/config-menu.sh${NC}"
     echo ""
     if [ "${AUTO_CONFIRM_ALL:-0}" = "1" ]; then
-        log_info "全自动模式：已跳过配置菜单，请按需手动执行: bash ./config-menu.sh"
+        log_info "全自动模式：已跳过配置菜单，请按需手动执行: bash ~/.openclaw/config-menu.sh"
     else
         if confirm "是否现在打开配置菜单？" "n"; then
             if ! run_config_menu; then
-                log_warn "配置菜单启动失败或被中断，可稍后手动运行: bash ./config-menu.sh"
+                log_warn "配置菜单启动失败或被中断，可稍后手动运行: bash ~/.openclaw/config-menu.sh"
             fi
         else
             echo ""
             echo -e "${CYAN}稍后可以通过以下命令打开配置菜单:${NC}"
-            echo "  bash ./config-menu.sh"
+            echo "  bash ~/.openclaw/config-menu.sh"
             echo ""
         fi
     fi

@@ -12003,20 +12003,6 @@ main() {
             echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
             exit 0
             ;;
-        --community-channels-only)
-            echo -e "${YELLOW}提示:${NC} 社区消息渠道入口已停用，改为打开官方消息渠道配置。"
-            config_channels_official
-            echo ""
-            echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
-            exit 0
-            ;;
-        --channels-only)
-            echo -e "${YELLOW}提示:${NC} 默认渠道入口已收敛为官方消息渠道配置。"
-            config_channels_official
-            echo ""
-            echo -e "${CYAN}官方消息渠道配置流程结束。${NC}"
-            exit 0
-            ;;
         --repair-config)
             repair_runtime_config_preserve_data
             echo ""

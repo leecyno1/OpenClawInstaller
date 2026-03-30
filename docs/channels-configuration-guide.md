@@ -6,7 +6,7 @@
 ## 1. 使用顺序（推荐）
 
 1. 先运行官方模型向导：`openclaw onboard`
-2. 再运行渠道菜单：`bash config-menu.sh`
+2. 再运行统一配置菜单：`bash ~/.openclaw/config-menu.sh`
 3. 每次改动后执行：
    - `openclaw doctor --fix`
    - `openclaw gateway restart`

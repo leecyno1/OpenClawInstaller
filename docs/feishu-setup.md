@@ -113,8 +113,8 @@ OpenClaw 飞书渠道具有以下特性：
 运行配置菜单：
 
 ```bash
-# 在本仓库目录运行
-bash ./config-menu.sh
+# 安装后统一入口
+bash ~/.openclaw/config-menu.sh
 
 # 或者多源下载运行（内置超时与自动回退）
 bash -c 'set -e; tmp="$(mktemp)"; for u in \
@@ -129,8 +129,8 @@ bash -c 'set -e; tmp="$(mktemp)"; for u in \
 done; rm -f "$tmp"; echo "All sources failed. 请稍后重试或更换网络。"; exit 1'
 ```
 
-1. 选择 `[3] 消息渠道配置`
-2. 选择 `[7] 飞书 (Feishu)`
+1. 选择 `[3] 官方渠道插件管理`
+2. 选择 `[5] 飞书 (Feishu)`
 3. 按提示输入 **App ID** 和 **App Secret**
 4. 配置完成后选择「是」重启 Gateway
 
