@@ -1275,10 +1275,29 @@ def _run_openclaw_config_set(key: str, value: str):
             check=False,
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=8,
         )
     except Exception:
         pass
+
+
+def _install_skill_via_openclaw(skill_id: str, timeout_sec: int = 30) -> bool:
+    """Try installing a missing skill through OpenClaw CLI as a fallback."""
+    if not skill_id or not shutil.which("openclaw"):
+        return False
+    try:
+        proc = subprocess.run(
+            ["openclaw", "skills", "add", skill_id],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+        )
+        if proc.returncode != 0:
+            return False
+        return os.path.isdir(os.path.join(OPENCLAW_SKILLS_DIR, skill_id))
+    except Exception:
+        return False
 
 
 def _sanitize_identity_field(value, default: str, max_len: int = 240) -> str:
@@ -1404,23 +1423,33 @@ def _sync_skills_to_local(payload_skills: list[str], role_id: str, scope: str, e
             except Exception:
                 pass
 
+    allow_remote_install = scope in {"skills", "all"}
     for skill in desired:
         target_dir = os.path.join(OPENCLAW_SKILLS_DIR, skill)
         if os.path.isdir(target_dir):
             installed.append(skill)
             continue
         if not bundle_dir:
-            missing.append(skill)
+            if allow_remote_install and _install_skill_via_openclaw(skill):
+                installed.append(skill)
+            else:
+                missing.append(skill)
             continue
         source_dir = os.path.join(bundle_dir, skill)
         if not os.path.isdir(source_dir):
-            missing.append(skill)
+            if allow_remote_install and _install_skill_via_openclaw(skill):
+                installed.append(skill)
+            else:
+                missing.append(skill)
             continue
         try:
             shutil.copytree(source_dir, target_dir, dirs_exist_ok=True)
             installed.append(skill)
         except Exception:
-            missing.append(skill)
+            if allow_remote_install and _install_skill_via_openclaw(skill):
+                installed.append(skill)
+            else:
+                missing.append(skill)
 
     managed_payload = {
         "updatedAt": datetime.now().isoformat(),
@@ -1434,7 +1463,61 @@ def _sync_skills_to_local(payload_skills: list[str], role_id: str, scope: str, e
         "installed": sorted(set(installed)),
         "removed": sorted(set(removed)),
         "missing": sorted(set(missing)),
+        "remoteInstallFallback": bool(allow_remote_install),
     }
+
+
+def _apply_openclaw_side_effects_async(
+    role_id: str,
+    role_meta: dict,
+    identity_profile: dict,
+    model_route: str,
+    skill_pack: str,
+    security: list[str],
+    hotbar: list[str],
+    pinned: list[str],
+    equipped: dict,
+    disabled_skills: list[str],
+):
+    """Run slow OpenClaw sync commands in background to keep API response fast."""
+
+    def _worker():
+        try:
+            _run_openclaw_config_set("identity.role.id", role_id)
+            _run_openclaw_config_set("identity.role.name", role_meta.get("className", role_id))
+            _run_openclaw_config_set("identity.name", identity_profile.get("assistantName", "Clawd"))
+            _run_openclaw_config_set("identity.user_name", identity_profile.get("userName", "主人"))
+            _run_openclaw_config_set("identity.region", identity_profile.get("region", "中国大陆"))
+            _run_openclaw_config_set("identity.timezone", identity_profile.get("timezone", "Asia/Shanghai"))
+            _run_openclaw_config_set("identity.goal", identity_profile.get("goal", "综合任务协作"))
+            _run_openclaw_config_set("identity.personality", identity_profile.get("personality", "严谨、务实、可协作"))
+            _run_openclaw_config_set("identity.work_style", identity_profile.get("workStyle", "先分析后执行，阶段性汇报"))
+            _run_openclaw_config_set("vendor.control.persona.role.id", role_id)
+            _run_openclaw_config_set("vendor.control.persona.role.name", role_meta.get("className", role_id))
+            _run_openclaw_config_set("vendor.control.routing.mode", model_route)
+            _run_openclaw_config_set("vendor.control.profile.skillPack", skill_pack)
+            _run_openclaw_config_set("vendor.control.profile.security", json.dumps(security, ensure_ascii=False))
+            _run_openclaw_config_set("vendor.control.profile.hotbar", json.dumps(hotbar, ensure_ascii=False))
+            _run_openclaw_config_set("vendor.control.profile.pinnedSkills", json.dumps(pinned, ensure_ascii=False))
+            _run_openclaw_config_set("vendor.control.profile.equipped", json.dumps(equipped, ensure_ascii=False))
+            _run_openclaw_config_set("vendor.control.profile.disabledSkills", json.dumps(disabled_skills, ensure_ascii=False))
+        except Exception:
+            pass
+
+        try:
+            apply_script = os.path.join(_repo_root_path(), "scripts", "apply-web-profile.sh")
+            if os.path.isfile(apply_script):
+                subprocess.run(
+                    ["bash", apply_script, OPENCLAW_WEB_PROFILE_JSON],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, name="openclaw-config-apply", daemon=True).start()
 
 
 def _extract_runtime_from_state(state_obj: dict):
@@ -2350,38 +2433,19 @@ def openclaw_config_apply():
             for env_key, env_val in bindings.items():
                 _upsert_env_export(env_key, env_val)
 
-        _run_openclaw_config_set("identity.role.id", role_id)
-        _run_openclaw_config_set("identity.role.name", role_meta["className"])
-        _run_openclaw_config_set("identity.name", identity_profile["assistantName"])
-        _run_openclaw_config_set("identity.user_name", identity_profile["userName"])
-        _run_openclaw_config_set("identity.region", identity_profile["region"])
-        _run_openclaw_config_set("identity.timezone", identity_profile["timezone"])
-        _run_openclaw_config_set("identity.goal", identity_profile["goal"])
-        _run_openclaw_config_set("identity.personality", identity_profile["personality"])
-        _run_openclaw_config_set("identity.work_style", identity_profile["workStyle"])
-        _run_openclaw_config_set("vendor.control.persona.role.id", role_id)
-        _run_openclaw_config_set("vendor.control.persona.role.name", role_meta["className"])
-        _run_openclaw_config_set("vendor.control.routing.mode", model_route)
-        _run_openclaw_config_set("vendor.control.profile.skillPack", skill_pack)
-        _run_openclaw_config_set("vendor.control.profile.security", json.dumps(security, ensure_ascii=False))
-        _run_openclaw_config_set("vendor.control.profile.hotbar", json.dumps(hotbar, ensure_ascii=False))
-        _run_openclaw_config_set("vendor.control.profile.pinnedSkills", json.dumps(pinned, ensure_ascii=False))
-        _run_openclaw_config_set("vendor.control.profile.equipped", json.dumps(equipped, ensure_ascii=False))
-        _run_openclaw_config_set("vendor.control.profile.disabledSkills", json.dumps(disabled_skills, ensure_ascii=False))
-
-        apply_script = os.path.join(_repo_root_path(), "scripts", "apply-web-profile.sh")
-        script_result = {"used": False, "ok": False, "msg": ""}
-        if os.path.isfile(apply_script):
-            script_result["used"] = True
-            proc = subprocess.run(
-                ["bash", apply_script, OPENCLAW_WEB_PROFILE_JSON],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False,
-            )
-            script_result["ok"] = proc.returncode == 0
-            script_result["msg"] = (proc.stdout or proc.stderr or "").strip()[:400]
+        _apply_openclaw_side_effects_async(
+            role_id=role_id,
+            role_meta=role_meta,
+            identity_profile=identity_profile,
+            model_route=model_route,
+            skill_pack=skill_pack,
+            security=security,
+            hotbar=hotbar,
+            pinned=pinned,
+            equipped=equipped,
+            disabled_skills=disabled_skills,
+        )
+        script_result = {"used": True, "scheduled": True, "msg": "background sync queued"}
 
         skills_result = _sync_skills_to_local(
             payload_skills=installed_skills,
